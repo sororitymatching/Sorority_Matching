@@ -548,9 +548,15 @@ if st.button("Run Matching Algorithm"):
                 flow_costs = df_glob_flow['Match Cost'].dropna()
                 greedy_costs = df_glob_greedy['Match Cost'].dropna()
                 summary_df = pd.DataFrame({
-                    'Metric': ['Total Matching Cost', 'Avg Cost', 'Min Cost', 'Max Cost'],
-                    'Global Flow': [flow_costs.sum(), flow_costs.mean(), flow_costs.min(), flow_costs.max()],
-                    'Global Greedy': [greedy_costs.sum(), greedy_costs.mean(), greedy_costs.min(), greedy_costs.max()]
+                    'Metric': ['Total Matching Cost', 'Avg Cost', 'Min Cost', 'Max Cost', 'Standard Deviation'],
+                    'Global Flow': [
+                        flow_costs.sum(), flow_costs.mean(), flow_costs.min(), flow_costs.max(),
+                        flow_costs.std() if len(flow_costs) > 1 else 0.0
+                    ],
+                    'Global Greedy': [
+                        greedy_costs.sum(), greedy_costs.mean(), greedy_costs.min(), greedy_costs.max(),
+                        greedy_costs.std() if len(greedy_costs) > 1 else 0.0
+                    ]
                 })
                 summary_df.to_excel(writer, sheet_name="Summary", index=False)
                 auto_adjust_columns(writer, "Summary", summary_df)
@@ -589,7 +595,7 @@ if st.button("Run Matching Algorithm"):
                 if not df_rot_greedy.empty:
                     sheet_name = "Round_1_Greedy" if bump_order_set == 'yes' else "Rotation_Greedy"
                     df_to_write = df_rot_greedy.copy()
-                    if bump_order_set == 'esy' and 'Round' in df_to_write.columns:
+                    if bump_order_set == 'yes' and 'Round' in df_to_write.columns:
                         df_to_write = df_to_write.drop(columns=['Round'])
 
                     df_to_write.to_excel(writer, sheet_name=sheet_name, index=False)
