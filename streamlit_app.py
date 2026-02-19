@@ -601,6 +601,10 @@ if st.button("Run Matching Algorithm"):
                     df_to_write.to_excel(writer, sheet_name=sheet_name, index=False)
                     auto_adjust_columns(writer, sheet_name, df_to_write)
 
+                    if not df_bump_greedy.empty and bump_order_set == 'no':
+                         df_bump_greedy.to_excel(writer, sheet_name="Bump_Logistics_Greedy", index=False)
+                         auto_adjust_columns(writer, "Bump_Logistics_Greedy", df_bump_greedy)
+
             results_buffers.append({
                 "party": party,
                 "buffer": output.getvalue()
