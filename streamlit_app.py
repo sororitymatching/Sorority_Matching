@@ -14,14 +14,19 @@ from sklearn.metrics.pairwise import haversine_distances
 st.set_page_config(page_title="Sorority Matching App", layout="wide")
 st.title("Sorority Matching Algorithm")
 
-# --- CACHED RESOURCES (Load once) ---
+# --- CACHED RESOURCES ---
 @st.cache_resource
 def load_model():
     return SentenceTransformer('all-MiniLM-L6-v2')
 
-@st.cache_data
-def load_data(url):
-    return pd.read_csv(url)
+# --- DATA LOADING FUNCTION ---
+# This safely loads Excel files. If missing, it returns an empty table.
+def load_excel_safe(filename):
+    try:
+        return pd.read_excel(filename)
+    except FileNotFoundError:
+        st.error(f"⚠️ Could not find file: {filename}")
+        return pd.DataFrame()
 
 # --- SIDEBAR INPUTS ---
 st.sidebar.header("Configuration")
@@ -30,50 +35,42 @@ num_pnm_matches_needed = st.sidebar.number_input("PNM Matches per Bump Team (Cap
 num_rounds_party = st.sidebar.number_input("Rounds per Party", min_value=1, value=4, step=1)
 bump_order_set = st.sidebar.radio("Is the bump order set?", ["y", "n"], index=1)
 
-# --- FILE UPLOADS (With Defaults) ---
-st.sidebar.header("Data Sources")
-st.sidebar.info("Defaults are set to the Google Sheets in your original script. You can upload new CSVs below to override them.")
+st.sidebar.header("Data Status")
 
-# Default URLs from your script
-defaults = {
-    "bump_teams": "https://docs.google.com/spreadsheets/d/17k1SjqTAxTp_fMtgkOg31aQG7fkKv8ehoGf4d_Q9Rcs/gviz/tq?tqx=out:csv&gid=0",
-    "party_excuses": "https://docs.google.com/spreadsheets/d/1JYgg0v8UYfbQntMfcrh9fHlU8EWhiExhOYYakOMD3VU/gviz/tq?tqx=out:csv&gid=0",
-    "member_interest": "https://docs.google.com/spreadsheets/d/1dcOXl5MEHGhjEORfN1jHzsu7uUwbYMS0VyUVCT24ahk/gviz/tq?tqx=out:csv&gid=0",
-    "member_pnm_no_match": "https://docs.google.com/spreadsheets/d/1X-dQ5j5zWYf5tGvceDpncQdFUjrVGeR-9Q3kFR_GyJU/gviz/tq?tqx=out:csv&gid=0",
-}
+# --- LOAD YOUR SPECIFIC GITHUB FILES ---
+# 1. Bump Teams
+bump_teams = load_excel_safe("Bump Team Creation Form - Sorority Members (Responses).xlsx")
+if not bump_teams.empty:
+    st.sidebar.success("✅ Bump Teams Loaded")
 
-# Allow user to upload or use default
-def get_df(label, key, default_url):
-    uploaded = st.sidebar.file_uploader(label, type="csv", key=key)
-    if uploaded:
-        return pd.read_csv(uploaded)
-    try:
-        return load_data(default_url)
-    except Exception as e:
-        st.error(f"Error loading default data for {label}: {e}")
-        return pd.DataFrame()
+# 2. Party Excuses
+party_excuses = load_excel_safe("Party Excuses for Recruitment - Sorority Members (Responses).xlsx")
+if not party_excuses.empty:
+    st.sidebar.success("✅ Party Excuses Loaded")
 
-# Load Data
-bump_teams = get_df("Bump Teams CSV", "f1", defaults["bump_teams"])
-party_excuses = get_df("Party Excuses CSV", "f2", defaults["party_excuses"])
-member_interest = get_df("Member Interest CSV", "f3", defaults["member_interest"])
-member_pnm_no_match = get_df("No Match CSV", "f4", defaults["member_pnm_no_match"])
+# 3. Member Interests
+member_interest = load_excel_safe("Sorority Members Interests (Real Data).xlsx")
+if not member_interest.empty:
+    st.sidebar.success("✅ Member Interests Loaded")
 
-# Load PNM Responses (Local file or Upload)
-pnm_file = st.sidebar.file_uploader("PNM Responses (synthetic_pnm_responses.csv)", type="csv")
-if pnm_file:
-    pnm_intial_interest = pd.read_csv(pnm_file)
-else:
-    try:
-        pnm_intial_interest = pd.read_csv("synthetic_pnm_responses.csv")
-    except:
-        st.warning("⚠️ Could not find 'synthetic_pnm_responses.csv'. Please upload it in the sidebar.")
-        pnm_intial_interest = pd.DataFrame()
+# 4. No Match List
+member_pnm_no_match = load_excel_safe("Prior PNM Connection Form - Sorority Members (Responses).xlsx")
+if not member_pnm_no_match.empty:
+    st.sidebar.success("✅ No Match List Loaded")
+
+# 5. PNM Responses (This one is a CSV)
+try:
+    pnm_intial_interest = pd.read_csv("synthetic_pnm_responses.csv")
+    st.sidebar.success("✅ PNM Responses Loaded")
+except FileNotFoundError:
+    st.sidebar.error("⚠️ Missing 'synthetic_pnm_responses.csv'")
+    pnm_intial_interest = pd.DataFrame()
+
 
 # --- MAIN LOGIC ---
 if st.button("Run Matching Algorithm"):
     if pnm_intial_interest.empty or bump_teams.empty:
-        st.error("Missing data files. Please check sidebar.")
+        st.error("Missing critical data files. Please check the GitHub repo.")
         st.stop()
 
     with st.spinner("Initializing models and processing data..."):
@@ -83,12 +80,10 @@ if st.button("Run Matching Algorithm"):
         
         # Create assignments
         pnms_per_party = 45 
-        # Ensure we don't error if input is small
         if len(pnm_working) < pnms_per_party:
             pnms_per_party = len(pnm_working)
             
-        party_assignments = np.tile(np.arange(1, 38), 45) # Hardcoded 37 parties as per script logic, adjusted to match length
-        # Adjust length if exact match needed
+        party_assignments = np.tile(np.arange(1, 38), 45) 
         if len(party_assignments) > len(pnm_working):
             party_assignments = party_assignments[:len(pnm_working)]
         
@@ -111,14 +106,19 @@ if st.button("Run Matching Algorithm"):
         
         # --- GEOCODING ---
         url_geo = "https://raw.githubusercontent.com/kelvins/US-Cities-Database/main/csv/us_cities.csv"
-        ref_df = load_data(url_geo)
-        ref_df['MATCH_KEY'] = (ref_df['CITY'] + ", " + ref_df['STATE_CODE']).str.upper()
-        ref_df = ref_df.drop_duplicates(subset=['MATCH_KEY'], keep='first')
-        city_coords_map = {
-            key: [lat, lon]
-            for key, lat, lon in zip(ref_df['MATCH_KEY'], ref_df['LATITUDE'], ref_df['LONGITUDE'])
-        }
-        ALL_CITY_KEYS = list(city_coords_map.keys())
+        try:
+            ref_df = pd.read_csv(url_geo)
+            ref_df['MATCH_KEY'] = (ref_df['CITY'] + ", " + ref_df['STATE_CODE']).str.upper()
+            ref_df = ref_df.drop_duplicates(subset=['MATCH_KEY'], keep='first')
+            city_coords_map = {
+                key: [lat, lon]
+                for key, lat, lon in zip(ref_df['MATCH_KEY'], ref_df['LATITUDE'], ref_df['LONGITUDE'])
+            }
+            ALL_CITY_KEYS = list(city_coords_map.keys())
+        except:
+            st.warning("Could not load Geocoding database. Geo features will be skipped.")
+            city_coords_map = {}
+            ALL_CITY_KEYS = []
 
         def get_coords_offline(hometown_str):
             if not isinstance(hometown_str, str): return None, None
@@ -131,23 +131,24 @@ if st.button("Run Matching Algorithm"):
             return None, None
 
         # --- CLUSTERING ---
-        # (Simplified for brevity: replicating the logic from your script)
         all_coords = []
         geo_tracker = []
         
         # Members
         for idx, row in member_interest.iterrows():
-            lat, lon = get_coords_offline(row['Hometown'])
-            if lat:
-                all_coords.append([radians(lat), radians(lon)])
-                geo_tracker.append({'type': 'mem', 'id': row['Sorority ID'], 'hometown': row['Hometown']})
+            if 'Hometown' in row:
+                lat, lon = get_coords_offline(row['Hometown'])
+                if lat:
+                    all_coords.append([radians(lat), radians(lon)])
+                    geo_tracker.append({'type': 'mem', 'id': row['Sorority ID'], 'hometown': row['Hometown']})
         
         # PNMs
         for idx, row in pnm_working.iterrows():
-            lat, lon = get_coords_offline(row['Hometown'])
-            if lat:
-                all_coords.append([radians(lat), radians(lon)])
-                geo_tracker.append({'type': 'pnm', 'id': row['PNM ID'], 'hometown': row['Hometown']})
+            if 'Hometown' in row:
+                lat, lon = get_coords_offline(row['Hometown'])
+                if lat:
+                    all_coords.append([radians(lat), radians(lon)])
+                    geo_tracker.append({'type': 'pnm', 'id': row['PNM ID'], 'hometown': row['Hometown']})
 
         mem_geo_tags = {}
         pnm_geo_tags = {}
@@ -219,7 +220,7 @@ if st.button("Run Matching Algorithm"):
         mem_final_attrs = {row['Sorority ID']: set() for _, row in member_interest.iterrows()}
         for idx, row in member_interest.iterrows():
             pid = row['Sorority ID']
-            yt = get_year_tag(row['Year'])
+            yt = get_year_tag(row.get('Year'))
             if yt: mem_final_attrs[pid].add(yt)
             if pid in mem_geo_tags: mem_final_attrs[pid].add(mem_geo_tags[pid])
         for entry in mem_interest_map:
@@ -230,7 +231,7 @@ if st.button("Run Matching Algorithm"):
         pnm_final_attrs = {row['PNM ID']: set() for _, row in pnm_working.iterrows()}
         for idx, row in pnm_working.iterrows():
             pid = row['PNM ID']
-            yt = get_year_tag(row['Year'])
+            yt = get_year_tag(row.get('Year'))
             if yt: pnm_final_attrs[pid].add(yt)
             if pid in pnm_geo_tags: pnm_final_attrs[pid].add(pnm_geo_tags[pid])
         for entry in pnm_interest_map:
@@ -279,7 +280,8 @@ if st.button("Run Matching Algorithm"):
         with st.spinner(f"Processing Party {party}..."):
             pnms_df = pnm_working[pnm_working['Party'] == party].copy()
             if pnms_df.empty:
-                st.warning(f"No PNMs found for Party {party}")
+                # If no PNMs in this party, skip
+                progress_bar.progress(party / num_of_parties)
                 continue
                 
             pnm_list = []
@@ -389,7 +391,6 @@ if st.button("Run Matching Algorithm"):
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 pd.DataFrame(global_flow_results).to_excel(writer, sheet_name="Global_Matches", index=False)
-                # (You can add the greedy/rotation sheets here following the same pattern if needed)
             
             results_buffers.append({
                 "party": party,
@@ -400,6 +401,9 @@ if st.button("Run Matching Algorithm"):
 
     # --- DOWNLOADS ---
     st.success("Matching Complete!")
+    if not results_buffers:
+        st.warning("No matches generated. Check inputs.")
+        
     for res in results_buffers:
         st.download_button(
             label=f"Download Results for Party {res['party']}",
