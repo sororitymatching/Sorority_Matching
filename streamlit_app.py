@@ -565,21 +565,35 @@ if st.button("Run Matching Algorithm"):
                 # 3. Rotations & Bump
                 df_rot_flow = pd.DataFrame(internal_flow_results)
                 df_rot_greedy = pd.DataFrame(internal_greedy_results)
+                
+                # --- APPLY USER MODIFICATIONS HERE ---
+                if 'Team ID' in df_rot_flow.columns: df_rot_flow = df_rot_flow.drop(columns=['Team ID'])
+                if 'Team ID' in df_rot_greedy.columns: df_rot_greedy = df_rot_greedy.drop(columns=['Team ID'])
+
                 df_bump_flow = pd.DataFrame(bump_instruct_flow)
                 df_bump_greedy = pd.DataFrame(bump_instruct_greedy)
 
                 if not df_rot_flow.empty:
                     sheet_name = "Round_1_Flow" if bump_order_set == 'y' else "Rotation_Flow"
-                    df_rot_flow.to_excel(writer, sheet_name=sheet_name, index=False)
-                    auto_adjust_columns(writer, sheet_name, df_rot_flow)
+                    df_to_write = df_rot_flow.copy()
+                    if bump_order_set == 'y' and 'Round' in df_to_write.columns:
+                        df_to_write = df_to_write.drop(columns=['Round'])
+
+                    df_to_write.to_excel(writer, sheet_name=sheet_name, index=False)
+                    auto_adjust_columns(writer, sheet_name, df_to_write)
+                    
                     if not df_bump_flow.empty and bump_order_set == 'n':
                          df_bump_flow.to_excel(writer, sheet_name="Bump_Logistics_Flow", index=False)
                          auto_adjust_columns(writer, "Bump_Logistics_Flow", df_bump_flow)
 
                 if not df_rot_greedy.empty:
                     sheet_name = "Round_1_Greedy" if bump_order_set == 'y' else "Rotation_Greedy"
-                    df_rot_greedy.to_excel(writer, sheet_name=sheet_name, index=False)
-                    auto_adjust_columns(writer, sheet_name, df_rot_greedy)
+                    df_to_write = df_rot_greedy.copy()
+                    if bump_order_set == 'y' and 'Round' in df_to_write.columns:
+                        df_to_write = df_to_write.drop(columns=['Round'])
+
+                    df_to_write.to_excel(writer, sheet_name=sheet_name, index=False)
+                    auto_adjust_columns(writer, sheet_name, df_to_write)
 
             results_buffers.append({
                 "party": party,
