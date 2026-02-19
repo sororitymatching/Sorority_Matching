@@ -42,7 +42,7 @@ st.sidebar.header("Configuration")
 num_of_parties = st.sidebar.number_input("Total Number of Parties", min_value=1, value=1, step=1)
 num_pnm_matches_needed = st.sidebar.number_input("PNM Matches per Bump Team (Capacity)", min_value=1, value=5, step=1)
 num_rounds_party = st.sidebar.number_input("Rounds per Party", min_value=1, value=4, step=1)
-bump_order_set = st.sidebar.radio("Is the bump order set?", ["y", "n"], index=1)
+bump_order_set = st.sidebar.radio("Is the bump order set?", ["yes", "no"], index=1)
 
 st.sidebar.header("Data Status")
 
@@ -263,7 +263,7 @@ if st.button("Run Matching Algorithm"):
     # --- DEFINE INTERNAL ROTATION LOGIC (NESTED TO ACCESS CACHES) ---
     def run_internal_rotation(assignment_map, team_list, method='flow'):
         rotation_output = []
-        actual_rounds = 1 if bump_order_set == 'y' else num_rounds_party
+        actual_rounds = 1 if bump_order_set == 'yes' else num_rounds_party
 
         for t_idx, assigned_pnms in assignment_map.items():
             if not assigned_pnms: continue
@@ -574,22 +574,22 @@ if st.button("Run Matching Algorithm"):
                 df_bump_greedy = pd.DataFrame(bump_instruct_greedy)
 
                 if not df_rot_flow.empty:
-                    sheet_name = "Round_1_Flow" if bump_order_set == 'y' else "Rotation_Flow"
+                    sheet_name = "Round_1_Flow" if bump_order_set == 'yes' else "Rotation_Flow"
                     df_to_write = df_rot_flow.copy()
-                    if bump_order_set == 'y' and 'Round' in df_to_write.columns:
+                    if bump_order_set == 'yes' and 'Round' in df_to_write.columns:
                         df_to_write = df_to_write.drop(columns=['Round'])
 
                     df_to_write.to_excel(writer, sheet_name=sheet_name, index=False)
                     auto_adjust_columns(writer, sheet_name, df_to_write)
                     
-                    if not df_bump_flow.empty and bump_order_set == 'n':
+                    if not df_bump_flow.empty and bump_order_set == 'no':
                          df_bump_flow.to_excel(writer, sheet_name="Bump_Logistics_Flow", index=False)
                          auto_adjust_columns(writer, "Bump_Logistics_Flow", df_bump_flow)
 
                 if not df_rot_greedy.empty:
-                    sheet_name = "Round_1_Greedy" if bump_order_set == 'y' else "Rotation_Greedy"
+                    sheet_name = "Round_1_Greedy" if bump_order_set == 'yes' else "Rotation_Greedy"
                     df_to_write = df_rot_greedy.copy()
-                    if bump_order_set == 'y' and 'Round' in df_to_write.columns:
+                    if bump_order_set == 'esy' and 'Round' in df_to_write.columns:
                         df_to_write = df_to_write.drop(columns=['Round'])
 
                     df_to_write.to_excel(writer, sheet_name=sheet_name, index=False)
