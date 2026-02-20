@@ -56,42 +56,36 @@ def get_party_options():
         # Fallback if connection fails (defaults to 4 parties)
         return ["Party 1", "Party 2", "Party 3", "Party 4", "Preference Round"]
 
+@st.cache_data(ttl=300) # Cache for 5 minutes so it's fast
+def get_roster():
+    try:
+        gc = get_connection()
+        config_sheet = gc.open(SHEET_NAME).worksheet("Config")
+        
+        # Get all values from Column D (assuming D1 is header, so start at D2)
+        # get_col(4) gets the 4th column (D)
+        names = config_sheet.col_values(4)
+        
+        # Remove the header if it exists (e.g., if D1 says "Roster")
+        if names and names[0] == "Roster":
+            names = names[1:]
+            
+        # Add the empty option at the start
+        final_list = [""] + [n for n in names if n.strip()]
+        return final_list
+        
+    except Exception as e:
+        # Fallback to a small list if connection fails, so app doesn't crash
+        return ["", "Error loading roster..."]
+
 # --- MAIN APP LAYOUT ---
 st.title("🎉 Recruitment Party Excuse Form")
 st.markdown("Please fill out this form if you cannot attend a specific party.")
 
 # Create the form
 with st.form(key='excuse_form'):
-    # 1. Create your list of members
-    roster = [
-        "",
-        "Hailey Abbott", "Sophie Adams", "Caroline Allen", "Emily Anderson", "Jessica Armstrong",
-        "Hannah Bailey", "Olivia Baker", "Riley Barnes", "Lucy Bell", "Maya Bennett",
-        "Chloe Black", "Savannah Brooks", "Charlotte Brown", "Morgan Bryant", "Jordan Butler",
-        "Emma Campbell", "Avery Carter", "Mia Clark", "Taylor Coleman", "Harper Collins",
-        "Zoe Cook", "Ella Cooper", "Payton Cox", "Sofia Cruz", "Madison Davis",
-        "Camila Diaz", "Samantha Edwards", "Lily Evans", "Ruby Fisher", "Elena Flores",
-        "Audrey Foster", "Isabella Garcia", "Kendall Gibson", "Ariana Gomez", "Reese Graham",
-        "Piper Gray", "Abigail Green", "Quinn Griffin", "Grace Hall", "Sydney Hamilton",
-        "Elizabeth Harris", "Layla Harrison", "Kennedy Hayes", "Alexa Henderson", "Victoria Hernandez",
-        "Scarlett Hill", "Stella Howard", "Violet Hughes", "Avery Jackson", "Clara James",
-        "Allison Jenkins", "Sophia Johnson", "Ava Jones", "Brooklyn Kelly", "Nora King",
-        "Aria Lee", "Addison Lewis", "Paige Long", "Gianna Lopez", "Eleanor Martin",
-        "Luna Martinez", "Kinsley Mason", "Bailey Matthews", "Sadie McDonald", "Evelyn Miller",
-        "Penelopy Mitchell", "Amelia Moore", "Mackenzie Morgan", "Hazel Morris", "Lillian Murphy",
-        "Reagan Myers", "Willow Nelson", "Christine Nguyen", "Valeria Ortiz", "Skylar Parker",
-        "Priya Patel", "Cadence Patterson", "Gabriella Perez", "Jasmine Perry", "Aubrey Peterson",
-        "Madelyn Phillips", "Vivian Powell", "Hayden Price", "Natalia Ramirez", "Lydia Reed",
-        "Andrea Reyes", "Brooke Reynolds", "Katherine Richardson", "Ximena Rivera", "Anna Roberts",
-        "Mila Robinson", "Camila Rodriguez", "Bella Rogers", "Gabrielle Ross", "Summer Russell",
-        "Sara Sanchez", "Faith Sanders", "Aurora Scott", "Reagan Simmons", "Olivia Smith",
-        "Presely Snyder", "Natalie Stewart", "Courtney Sullivan", "Layla Taylor", "Zoey Thomas",
-        "Leah Thompson", "Valentina Torres", "Ellie Turner", "Harper Walker", "Lauren Ward",
-        "Alexis Washington", "Ashley Watson", "Emerson Webb", "Hadley Wells", "Jade West",
-        "Addison White", "Emma Williams", "Abigail Wilson", "Emery Wood", "Delaney Woods",
-        "Riley Wright", "Alice Young", "Tatum Zimmer", "Sloan Ackerman", "Teagan Brady",
-        "Rory Callahan", "Fiona Doherty", "Blair Ellis", "Maeve Gallagher", "Keira Harrington"
-    ]
+    # 1. Get list of members from Google Sheets
+    roster = get_roster()
     
     # 2. Input: Name (Dropdown)
     name = st.selectbox("Choose your name:", roster)
