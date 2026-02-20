@@ -6,34 +6,56 @@ import pandas as pd
 SHEET_NAME = "Party Excuses (Test)"
 ADMIN_PASSWORD = "password" 
 
-# --- AUTHENTICATION (Modern Method) ---
+# Define scopes to ensure we have permission to write to the sheet
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
+
+# --- AUTHENTICATION FUNCTIONS ---
+
 def get_data_from_sheet():
     """Connects to Google Sheets and returns a dataframe."""
     try:
-        # 1. Connect using the modern gspread method (no oauth2client needed)
-        # This automatically uses the scopes needed for Drive & Sheets
-        gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
+        # Connect using the secrets and explicit scopes
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        gc = gspread.service_account_from_dict(creds_dict, scopes=SCOPES)
         
-        # 2. Open the spreadsheet
+        # Open the spreadsheet
         sheet = gc.open(SHEET_NAME).sheet1
         
-        # 3. Get ALL values (raw list of lists) instead of records
-        # This prevents errors with duplicate headers or empty columns
+        # Get ALL values (raw list of lists)
         data = sheet.get_all_values()
         
-        # 4. Check if data exists
+        # Check if data exists
         if not data:
             return pd.DataFrame()
 
-        # 5. Convert to Pandas DataFrame
-        # The first row (data[0]) is the header
-        # The rest (data[1:]) is the actual data
+        # Convert to Pandas DataFrame
         df = pd.DataFrame(data[1:], columns=data[0])
         return df
 
     except Exception as e:
         st.error(f"Error connecting to Google Sheets: {e}")
         return pd.DataFrame()
+
+def update_party_count(new_count):
+    """Updates the number of parties in the Config tab."""
+    try:
+        # Connect using the secrets and explicit scopes
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        gc = gspread.service_account_from_dict(creds_dict, scopes=SCOPES)
+        
+        # Open the specific 'Config' tab
+        # Note: You MUST create a tab named 'Config' in your sheet for this to work
+        config_sheet = gc.open(SHEET_NAME).worksheet("Config")
+        
+        # Update cell B1
+        config_sheet.update_acell('B1', new_count)
+        return True
+    except Exception as e:
+        st.error(f"Error updating config: {e}")
+        return False
 
 # --- MAIN APP LAYOUT ---
 st.set_page_config(page_title="Admin Dashboard", layout="wide")
@@ -52,13 +74,32 @@ if not st.session_state.authenticated:
     elif password_input:
         st.error("Incorrect password.")
 else:
-    # --- IF LOGGED IN, SHOW DATA ---
-    st.success("Logged in as Admin")
+    # --- IF LOGGED IN ---
     
-    if st.button("Refresh Data"):
-        st.rerun()
+    # 1. Header and Refresh Button
+    col1, col2 = st.columns([3,1])
+    with col1:
+        st.success("Logged in as Admin")
+    with col2:
+        if st.button("🔄 Refresh Data"):
+            st.rerun()
 
-    # Load data
+    # 2. SETTINGS SECTION (New Feature)
+    st.markdown("### ⚙️ Event Settings")
+    with st.form("settings_form"):
+        st.markdown("Set the number of parties users can choose from.")
+        
+        # Let admin choose a number between 1 and 20
+        new_party_count = st.number_input("Number of Parties (Rounds):", min_value=1, max_value=20, value=4)
+        save_settings = st.form_submit_button("Update Party Count")
+        
+        if save_settings:
+            if update_party_count(new_party_count):
+                st.toast(f"✅ Updated! Users will now see {new_party_count} parties.")
+            
+    st.divider() # distinct line to separate settings from data
+
+    # 3. Load and Display Data
     df = get_data_from_sheet()
 
     if not df.empty:
@@ -66,10 +107,12 @@ else:
         search_term = st.text_input("🔍 Search by Name:")
         
         if search_term:
-            # Filter the dataframe based on the name column
             # We use 'Choose your name:' because that matches your CSV header exactly
-            # If the column name changes in the sheet, update it here!
-            df = df[df["Choose your name:"].str.contains(search_term, case=False, na=False)]
+            col_name = "Choose your name:"
+            if col_name in df.columns:
+                df = df[df[col_name].str.contains(search_term, case=False, na=False)]
+            else:
+                st.warning(f"Column '{col_name}' not found. Showing all data.")
 
         # METRICS
         st.metric("Total Excuses Submitted", len(df))
