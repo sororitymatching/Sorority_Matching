@@ -115,37 +115,52 @@ else:
         if not df_teams.empty:
             # --- NEW: RANKING EDITOR ---
             with st.expander("⭐ Assign/Update Team Rankings", expanded=True):
-                col_a, col_b, col_c = st.columns([2, 2, 1])
+                # 1. Create a descriptive label for each team
+                # format: "ID: 1 | Members: Hailey Abbott, Sophie Adams..."
+                df_teams['display_label'] = df_teams.apply(
+                    lambda x: f"Team {x['Team ID']} | {x['Creator Name']}, {x['Bump Partners']}", 
+                    axis=1
+                )
+                
+                col_a, col_b, col_c = st.columns([3, 1, 1])
                 
                 with col_a:
-                    # Create a list of available Team IDs for the dropdown
-                    team_list = df_teams["Team ID"].tolist()
-                    selected_team = st.selectbox("Select Team ID to Rank:", team_list)
+                    # Dropdown shows the full description, but we map it back to the ID
+                    selected_label = st.selectbox("Select Team to Rank:", df_teams['display_label'].tolist())
+                    
+                    # Extract the actual Team ID from the selection to use for the update function
+                    selected_team_id = df_teams[df_teams['display_label'] == selected_label]['Team ID'].values[0]
                 
                 with col_b:
-                    new_rank = st.number_input(f"Assign Rank for Team {selected_team}:", min_value=1, value=1)
+                    # Default the input to the current rank if it exists, otherwise 1
+                    current_rank = df_teams[df_teams['Team ID'] == selected_team_id]['Ranking'].values[0]
+                    initial_val = int(current_rank) if str(current_rank).isdigit() else 1
+                    
+                    new_rank = st.number_input(f"Assign Rank:", min_value=1, value=initial_val, key="rank_input")
                 
                 with col_c:
                     st.markdown("<br>", unsafe_allow_html=True) # Align button
                     if st.button("Save Rank"):
-                        if update_team_ranking(selected_team, new_rank):
-                            st.success(f"Rank {new_rank} assigned to Team {selected_team}!")
-                            st.rerun() # Refresh to show new rank in table
+                        if update_team_ranking(selected_team_id, new_rank):
+                            st.success(f"Rank {new_rank} assigned!")
+                            st.rerun() 
 
             st.divider()
 
             # SEARCH & TABLE
             search = st.text_input("🔍 Search Teams:")
+            
+            # Remove the temporary display column before showing the table or downloading
+            display_df = df_teams.drop(columns=['display_label'])
+            
             if search:
-                mask = df_teams.apply(lambda x: x.astype(str).str.contains(search, case=False).any(), axis=1)
-                df_teams = df_teams[mask]
+                mask = display_df.apply(lambda x: x.astype(str).str.contains(search, case=False).any(), axis=1)
+                display_df = display_df[mask]
 
-            st.metric("Total Teams", len(df_teams))
+            st.metric("Total Teams", len(display_df))
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
             
-            # Highlight rows that don't have a rank yet
-            st.dataframe(df_teams, use_container_width=True, hide_index=True)
-            
-            csv_teams = df_teams.to_csv(index=False).encode('utf-8')
+            csv_teams = display_df.to_csv(index=False).encode('utf-8')
             st.download_button("Download Teams CSV", csv_teams, "bump_teams.csv", "text/csv")
         else:
             st.info("No bump teams found yet.")
