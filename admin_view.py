@@ -3,7 +3,7 @@ import gspread
 import pandas as pd
 
 # --- CONFIGURATION ---
-SHEET_NAME = "Party Excuses (Test)"
+SHEET_NAME = "OverallMatchingInformation"
 ADMIN_PASSWORD = "password"
 
 # Define scopes to ensure we have permission to write to the sheet
