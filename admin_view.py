@@ -1,30 +1,36 @@
 import streamlit as st
 import gspread
 import pandas as pd
-from oauth2client.service_account import ServiceAccountCredentials
 
 # --- CONFIGURATION ---
-SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 SHEET_NAME = "Party Excuses for Recruitment - Sorority Members"
-# 🔒 SET A PASSWORD FOR ACCESS
 ADMIN_PASSWORD = "password" 
 
-# --- AUTHENTICATION (Reused from your main app) ---
+# --- AUTHENTICATION (Modern Method) ---
 def get_data_from_sheet():
     """Connects to Google Sheets and returns a dataframe."""
     try:
-        # Load credentials from the SAME secrets file
-        creds_dict = st.secrets["gcp_service_account"]
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SCOPE)
-        client = gspread.authorize(creds)
+        # 1. Connect using the modern gspread method (no oauth2client needed)
+        # This automatically uses the scopes needed for Drive & Sheets
+        gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
         
-        # Open the spreadsheet and get all values
-        sheet = client.open(SHEET_NAME).sheet1
-        data = sheet.get_all_records()
+        # 2. Open the spreadsheet
+        sheet = gc.open(SHEET_NAME).sheet1
         
-        # Convert to a Pandas DataFrame for easy viewing
-        df = pd.DataFrame(data)
+        # 3. Get ALL values (raw list of lists) instead of records
+        # This prevents errors with duplicate headers or empty columns
+        data = sheet.get_all_values()
+        
+        # 4. Check if data exists
+        if not data:
+            return pd.DataFrame()
+
+        # 5. Convert to Pandas DataFrame
+        # The first row (data[0]) is the header
+        # The rest (data[1:]) is the actual data
+        df = pd.DataFrame(data[1:], columns=data[0])
         return df
+
     except Exception as e:
         st.error(f"Error connecting to Google Sheets: {e}")
         return pd.DataFrame()
@@ -35,7 +41,6 @@ st.set_page_config(page_title="Admin Dashboard", layout="wide")
 st.title("📊 Recruitment Excuses Dashboard")
 
 # 🔒 PASSWORD PROTECTION
-# This checks if the password has been entered correctly
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
@@ -62,12 +67,12 @@ else:
         
         if search_term:
             # Filter the dataframe based on the name column
-            # Note: We use the column name exactly as it appears in the Sheet
+            # We use 'Choose your name:' because that matches your CSV header exactly
+            # If the column name changes in the sheet, update it here!
             df = df[df["Choose your name:"].str.contains(search_term, case=False, na=False)]
 
         # METRICS
-        total_excuses = len(df)
-        st.metric("Total Excuses Submitted", total_excuses)
+        st.metric("Total Excuses Submitted", len(df))
 
         # DISPLAY THE TABLE
         st.dataframe(
@@ -77,7 +82,6 @@ else:
         )
 
         # DOWNLOAD BUTTON
-        # Allows you to download the current view as a CSV
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="Download data as CSV",
@@ -86,4 +90,4 @@ else:
             mime='text/csv',
         )
     else:
-        st.info("No excuses have been submitted yet.")
+        st.info("No data found. The sheet might be empty or the connection failed.")
