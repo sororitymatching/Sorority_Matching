@@ -57,6 +57,31 @@ def update_party_count(new_count):
         st.error(f"Error updating config: {e}")
         return False
 
+def update_roster(names_list):
+    """Updates the roster in the Config tab, Column D."""
+    try:
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        gc = gspread.service_account_from_dict(creds_dict, scopes=SCOPES)
+        config_sheet = gc.open(SHEET_NAME).worksheet("Config")
+        
+        # 1. Clear existing names in Column D (from row 2 down)
+        # We assume D1 is the header "Roster"
+        config_sheet.batch_clear(["D2:D1000"])
+        
+        # 2. Format data for upload (must be a list of lists: [['Name 1'], ['Name 2']])
+        # We sort them alphabetically for you automatically
+        names_list.sort()
+        formatted_names = [[name] for name in names_list if name.strip()]
+        
+        # 3. Update Column D starting at D2
+        if formatted_names:
+            config_sheet.update(range_name='D2', values=formatted_names)
+            
+        return True
+    except Exception as e:
+        st.error(f"Error updating roster: {e}")
+        return False
+
 # --- MAIN APP LAYOUT ---
 st.set_page_config(page_title="Admin Dashboard", layout="wide")
 
