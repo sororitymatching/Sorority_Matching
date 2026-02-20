@@ -3,162 +3,130 @@ import gspread
 import pandas as pd
 
 # --- CONFIGURATION ---
-SHEET_NAME = "OverallMatchingInformation"
+SHEET_NAME = "Party Excuses (Test)"
 ADMIN_PASSWORD = "password"
 
-# Define scopes to ensure we have permission to write to the sheet
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
 
-# --- AUTHENTICATION FUNCTIONS ---
+# --- HELPERS ---
+def get_gc():
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    return gspread.service_account_from_dict(creds_dict, scopes=SCOPES)
 
-def get_data_from_sheet():
-    """Connects to Google Sheets and returns a dataframe."""
+def get_data(worksheet_name):
+    """Gets all data from a specific worksheet."""
     try:
-        creds_dict = dict(st.secrets["gcp_service_account"])
-        gc = gspread.service_account_from_dict(creds_dict, scopes=SCOPES)
-        sheet = gc.open(SHEET_NAME).sheet1
+        gc = get_gc()
+        sheet = gc.open(SHEET_NAME).worksheet(worksheet_name)
         data = sheet.get_all_values()
-        if not data:
-            return pd.DataFrame()
-        df = pd.DataFrame(data[1:], columns=data[0])
-        return df
+        if not data: return pd.DataFrame()
+        return pd.DataFrame(data[1:], columns=data[0])
     except Exception as e:
-        st.error(f"Error connecting to Google Sheets: {e}")
+        if worksheet_name == "Bump Teams":
+            st.warning("Could not find 'Bump Teams' tab. Please create it in Google Sheets.")
         return pd.DataFrame()
 
-def update_party_count(new_count):
-    """Updates the number of parties in the Config tab."""
+def update_config(cell, value):
     try:
-        creds_dict = dict(st.secrets["gcp_service_account"])
-        gc = gspread.service_account_from_dict(creds_dict, scopes=SCOPES)
-        config_sheet = gc.open(SHEET_NAME).worksheet("Config")
-        config_sheet.update_acell('B1', new_count)
+        gc = get_gc()
+        gc.open(SHEET_NAME).worksheet("Config").update_acell(cell, value)
         return True
-    except Exception as e:
-        st.error(f"Error updating config: {e}")
-        return False
+    except: return False
 
 def update_roster(names_list):
-    """Updates the roster in the Config tab, Column D."""
     try:
-        creds_dict = dict(st.secrets["gcp_service_account"])
-        gc = gspread.service_account_from_dict(creds_dict, scopes=SCOPES)
-        config_sheet = gc.open(SHEET_NAME).worksheet("Config")
-        
-        # 1. Clear existing names in Column D (from row 2 down)
-        config_sheet.batch_clear(["D2:D1000"])
-        
-        # 2. Format data for upload
+        gc = get_gc()
+        ws = gc.open(SHEET_NAME).worksheet("Config")
+        ws.batch_clear(["D2:D1000"])
         names_list.sort()
-        formatted_names = [[name] for name in names_list if name.strip()]
-        
-        # 3. Update Column D starting at D2
-        if formatted_names:
-            config_sheet.update(range_name='D2', values=formatted_names)
-            
+        formatted = [[n] for n in names_list if n.strip()]
+        if formatted: ws.update(range_name='D2', values=formatted)
         return True
-    except Exception as e:
-        st.error(f"Error updating roster: {e}")
-        return False
+    except: return False
 
-# --- MAIN APP LAYOUT ---
+# --- MAIN PAGE ---
 st.set_page_config(page_title="Admin Dashboard", layout="wide")
+st.title("📊 Sorority Admin Dashboard")
 
-st.title("📊 Recruitment Excuses Dashboard")
-
-# 🔒 PASSWORD PROTECTION
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
+# LOGIN
+if "authenticated" not in st.session_state: st.session_state.authenticated = False
 
 if not st.session_state.authenticated:
-    password_input = st.text_input("Enter Admin Password:", type="password")
-    if password_input == ADMIN_PASSWORD:
+    pwd = st.text_input("Enter Admin Password:", type="password")
+    if pwd == ADMIN_PASSWORD:
         st.session_state.authenticated = True
         st.rerun()
-    elif password_input:
-        st.error("Incorrect password.")
 else:
-    # --- IF LOGGED IN ---
-    
-    # 1. Header and Refresh Button
-    col1, col2 = st.columns([3,1])
-    with col1:
-        st.success("Logged in as Admin")
-    with col2:
-        if st.button("🔄 Refresh Data"):
-            st.rerun()
+    st.success("Logged in as Admin")
 
-    # 2. SETTINGS SECTION
-    st.markdown("### ⚙️ Event Settings")
-    with st.form("settings_form"):
-        st.markdown("Set the number of parties users can choose from.")
-        new_party_count = st.number_input("Number of Parties (Rounds):", min_value=1, max_value=100, value=1)
-        save_settings = st.form_submit_button("Update Party Count")
+    # TABS
+    tab1, tab2, tab3 = st.tabs(["Settings & Roster", "View Bump Teams", "View Excuses"])
+
+    with tab1:
+        st.header("Event Configuration")
         
-        if save_settings:
-            if update_party_count(new_party_count):
-                st.toast(f"✅ Updated! Users will now see {new_party_count} parties.")
-    
-    # 3. ROSTER SETTINGS (New Feature - Inserted Here)
-    st.markdown("### 👥 Member Roster")
-    with st.expander("Update Member List"):
-        st.info("Upload a CSV file with a single column of names to replace the current roster.")
+        # Party Count
+        with st.form("party_config"):
+            count = st.number_input("Number of Parties", 1, 50, 4)
+            if st.form_submit_button("Update Party Count"):
+                if update_config('B1', count): st.toast("Updated!")
         
-        uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
+        st.divider()
+        st.header("Roster Management")
         
-        if uploaded_file is not None:
-            # Read the CSV
+        # Roster Upload
+        file = st.file_uploader("Upload Member List (CSV)", type="csv")
+        if file:
             try:
-                # We assume the CSV has no header, or we just take the first column
-                roster_df = pd.read_csv(uploaded_file, header=None)
-                
-                # Get all names as a flat list
-                new_names = roster_df[0].astype(str).tolist()
-                
-                st.write(f"Found {len(new_names)} names. Preview: {new_names[:5]}...")
-                
-                if st.button("Confirm & Replace Roster"):
-                    if update_roster(new_names):
-                        st.toast(f"✅ Success! Roster updated with {len(new_names)} members.")
+                new_names = pd.read_csv(file, header=None)[0].astype(str).tolist()
+                st.write(f"Preview: {new_names[:3]}...")
+                if st.button("Replace Roster"):
+                    if update_roster(new_names): st.toast("Roster Updated Successfully!")
             except Exception as e:
                 st.error(f"Error reading CSV: {e}")
 
-    st.divider() # distinct line to separate settings from data
-
-    # 4. Load and Display Data
-    df = get_data_from_sheet()
-
-    if not df.empty:
-        # SEARCH FILTER
-        search_term = st.text_input("🔍 Search by Name:")
+    with tab2:
+        if st.button("🔄 Refresh Teams"): st.rerun()
+        df_teams = get_data("Bump Teams")
         
-        if search_term:
-            col_name = "Choose your name:"
-            if col_name in df.columns:
-                df = df[df[col_name].str.contains(search_term, case=False, na=False)]
-            else:
-                st.warning(f"Column '{col_name}' not found. Showing all data.")
+        if not df_teams.empty:
+            # Search filter
+            search = st.text_input("🔍 Search Teams by Creator or Partner:")
+            if search:
+                # Search across multiple columns
+                mask = df_teams.apply(lambda x: x.astype(str).str.contains(search, case=False).any(), axis=1)
+                df_teams = df_teams[mask]
 
-        # METRICS
-        st.metric("Total Excuses Submitted", len(df))
+            st.metric("Total Teams Created", len(df_teams))
+            st.dataframe(df_teams, use_container_width=True)
+            csv_teams = df_teams.to_csv(index=False).encode('utf-8')
+            st.download_button("Download Bump Teams CSV", csv_teams, "bump_teams.csv", "text/csv")
+        else:
+            st.info("No bump teams found yet.")
 
-        # DISPLAY THE TABLE
-        st.dataframe(
-            df, 
-            use_container_width=True,
-            hide_index=True
-        )
+    with tab3:
+        if st.button("🔄 Refresh Excuses"): st.rerun()
+        # Assuming excuses are on the first sheet (Sheet1)
+        # Note: You can rename 'Sheet1' in your Google Sheet, but you must update code if you do.
+        # We'll assume the first sheet is always excuses.
+        try:
+            gc = get_gc()
+            df_excuses = get_data("Party Excuses")
+        except:
+            df_excuses = pd.DataFrame()
 
-        # DOWNLOAD BUTTON
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="Download data as CSV",
-            data=csv,
-            file_name='recruitment_excuses.csv',
-            mime='text/csv',
-        )
-    else:
-        st.info("No data found. The sheet might be empty or the connection failed.")
+        if not df_excuses.empty:
+            st.dataframe(df_excuses, use_container_width=True)
+            csv = df_excuses.to_csv(index=False).encode('utf-8')
+            st.download_button("Download Excuses CSV", csv, "excuses.csv", "text/csv")
+        else:
+            st.info("No excuses found.")
+
+    
+    
+
+
+
