@@ -25,7 +25,7 @@ def get_google_sheet():
         return None
 
 # --- MAIN APP LAYOUT ---
-st.title("🎉 Recruitment Party Excuse Form")
+st.title("Recruitment Party Excuse Form")
 st.markdown("Please fill out this form if you cannot attend a specific party.")
 
 # Create the form
@@ -34,7 +34,7 @@ with st.form(key='excuse_form'):
     name = st.text_input("Choose your name:")
 
     # Input: Party Selection (Multi-select allows picking multiple parties)
-    party_options = ["Party 1", "Party 2", "Party 3", "Party 4", "Preference Round"]
+    party_options = ["Party 1", "Party 2", "Party 3", "Party 4", "Party 5", "Party 6", "Party 7", "Party 8", "Party 9", "Party 10", "Party 11", "Party 12", "Party 13", "Party 14", "Party 15", "Party 16", "Party 17", "Party 18", "Party 19", "Party 20", "Party 21", "Party 22", "Party 23", "Party 24", "Party 25", "Party 26", "Party 27", "Party 28", "Party 29", "Party 30", "Party 31", "Party 32", "Party 33", "Party 34", "Party 35", "Party 36", "Party 37"]
     parties = st.multiselect("Choose the party/parties you are unable to attend:", party_options)
     
     # Submit Button
