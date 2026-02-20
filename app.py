@@ -76,42 +76,78 @@ def get_roster():
         return ["", "Error loading roster..."]
 
 # --- MAIN APP LAYOUT ---
-st.title("🎉 Recruitment Party Excuse Form")
-st.markdown("Please fill out this form if you cannot attend a specific party.")
+# --- MAIN APP LAYOUT ---
+st.title("Sorority Recruitment Portal")
+tab1, tab2 = st.tabs(["Create Bump Team", "Party Excuses"])
 
-# Create the form
-with st.form(key='excuse_form'):
-    # 1. Get list of members from Google Sheets
-    roster = get_roster()
-    
-    # 2. Input: Name (Dropdown)
-    name = st.selectbox("Choose your name:", roster)
+with tab1:
+    st.header("Bump Team Creation")
+    st.markdown("Select your partners and RGL to form a bump team.")
 
-    # 3. Input: Party Selection (Dynamic)
-    # This fetches the number of parties from your Google Sheet 'Config' tab
-    party_options = get_party_options() 
-    parties = st.multiselect("Choose the party/parties you are unable to attend:", party_options)
-    
-    # Submit Button
-    submit_button = st.form_submit_button(label='Submit Excuse')
+    with st.form(key='bump_form'):
+        # 1. Creator Name
+        creator_name = st.selectbox("Choose your name:", [""] + roster, key="bump_creator")
+        
+        # 2. Partners
+        partner_options = roster if not creator_name else [n for n in roster if n != creator_name]
+        partners = st.multiselect("Choose your bump partner(s):", partner_options)
+        
+        # 3. RGL
+        rgl = st.selectbox("Choose your Bump Group Leader (RGL):", ["None"] + roster)
+        
+        # 4. Details
+        # We removed Team ID input here because it is now automatic
+        ranking = st.number_input("Bump Team Ranking:", min_value=1, value=1)
 
-# --- SUBMISSION LOGIC ---
-if submit_button:
-    # Validation: Ensure name is not empty ("") and parties are selected
-    if name == "" or not parties:
-        st.warning("⚠️ Please select your name and the parties you are missing.")
-    else:
-        sheet = get_google_sheet()
-        if sheet:
-            # Format the data exactly like your CSV example
-            # [Timestamp, Name, Parties]
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            parties_str = ", ".join(parties) # Combines multiple selections into one string
-            
-            row_data = [timestamp, name, parties_str]
-            
-            # Append the row to Google Sheets
-            sheet.append_row(row_data)
-            
-            st.success(f"✅ Thank you, {name}! Your excuse for {parties_str} has been recorded.")
-            st.balloons()
+        submit_bump = st.form_submit_button(label='Submit Bump Team')
+
+    if submit_bump:
+        if not creator_name or not partners:
+            st.error("⚠️ Please fill in your name and at least one partner.")
+        else:
+            sheet = get_sheet("Bump Teams")
+            if sheet:
+                # --- AUTOMATIC TEAM ID LOGIC ---
+                # 1. Get all current values in the sheet
+                all_records = sheet.get_all_values()
+                
+                # 2. Calculate the next ID
+                # If the sheet only has a header (length 1), the first team is 1.
+                # If the sheet has 5 teams (length 6), the next team is 6.
+                next_id = len(all_records) 
+                
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                partners_str = ", ".join(partners)
+                rgl_val = "" if rgl == "None" else rgl
+                
+                # Columns: Timestamp, Creator, Partners, RGL, Team ID, Ranking
+                row_data = [timestamp, creator_name, partners_str, rgl_val, next_id, ranking]
+                
+                sheet.append_row(row_data)
+                st.success(f"✅ Bump Team #{next_id} created successfully!")
+                st.balloons()
+
+with tab1:
+    st.header("Recruitment Party Excuse Form")
+    st.markdown("Please fill out this form if you cannot attend a specific party.")
+
+    with st.form(key='excuse_form'):
+        roster = get_roster()
+        name = st.selectbox("Choose your name:", [""] + roster)
+        
+        party_options = get_party_options() 
+        parties = st.multiselect("Choose the party/parties you are unable to attend:", party_options)
+        
+        submit_excuse = st.form_submit_button(label='Submit Excuse')
+
+    if submit_excuse:
+        if not name or not parties:
+            st.warning("⚠️ Please fill in both your name and the parties.")
+        else:
+            sheet = get_sheet("Party Excuses") # Assuming excuses go to the first sheet
+            if sheet:
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                parties_str = ", ".join(parties)
+                sheet.append_row([timestamp, name, parties_str])
+                st.success(f"✅ Excuse recorded for {name}!")
+                st.balloons()
