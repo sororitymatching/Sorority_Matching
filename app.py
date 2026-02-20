@@ -48,13 +48,10 @@ def get_party_options():
         # If num_parties is 3, this creates: ["Party 1", "Party 2", "Party 3"]
         options = [f"Party {i+1}" for i in range(num_parties)]
         
-        # Always add Preference Round at the end
-        options.append("Preference Round")
-        
         return options
     except Exception as e:
         # Fallback if connection fails (defaults to 4 parties)
-        return ["Party 1", "Party 2", "Party 3", "Party 4", "Preference Round"]
+        return ["Party 1", "Party 2", "Party 3", "Party 4"]
 
 @st.cache_data(ttl=300) # Cache for 5 minutes so it's fast
 def get_roster():
