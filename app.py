@@ -4,7 +4,7 @@ from datetime import datetime
 
 # --- CONFIGURATION ---
 # Replace this with your actual Google Sheet name
-SHEET_NAME = "Party Excuses (Test)"
+SHEET_NAME = "OverallMatchingInformation"
 
 # Define scopes (permissions) for the connection
 SCOPES = [
