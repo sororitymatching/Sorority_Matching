@@ -3,7 +3,7 @@ import gspread
 import pandas as pd
 
 # --- CONFIGURATION ---
-SHEET_NAME = "Party Excuses for Recruitment - Sorority Members"
+SHEET_NAME = "Party Excuses (Test)"
 ADMIN_PASSWORD = "password" 
 
 # --- AUTHENTICATION (Modern Method) ---
