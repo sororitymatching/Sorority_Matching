@@ -89,8 +89,7 @@ else:
     with st.form("settings_form"):
         st.markdown("Set the number of parties users can choose from.")
         
-        # Let admin choose a number between 1 and 20
-        new_party_count = st.number_input("Number of Parties (Rounds):", min_value=1, max_value=20, value=4)
+        new_party_count = st.number_input("Number of Parties (Rounds):", min_value=1, max_value=100, value=1)
         save_settings = st.form_submit_button("Update Party Count")
         
         if save_settings:
