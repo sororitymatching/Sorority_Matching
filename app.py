@@ -73,9 +73,6 @@ with tab1:
         
         # 3. RGL
         rgl = st.selectbox("Choose your Bump Group Leader (RGL):", ["None"] + roster)
-        
-        # 4. Details
-        ranking = st.number_input("Bump Team Ranking:", min_value=1, value=1)
 
         submit_bump = st.form_submit_button(label='Submit Bump Team')
 
@@ -86,16 +83,16 @@ with tab1:
             sheet = get_sheet("Bump Teams")
             if sheet:
                 all_records = sheet.get_all_values()
-                next_id = len(all_records) # Auto-increment ID
-                
+                next_id = len(all_records) 
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 partners_str = ", ".join(partners)
                 rgl_val = "" if rgl == "None" else rgl
                 
-                row_data = [timestamp, creator_name, partners_str, rgl_val, next_id, ranking]
+                # We leave the last column (Ranking) empty for the admin
+                row_data = [timestamp, creator_name, partners_str, rgl_val, next_id, ""] 
                 sheet.append_row(row_data)
                 
-                st.success(f"✅ Bump Team #{next_id} created successfully!")
+                st.success(f"✅ Bump Team #{next_id} submitted!")
                 st.balloons()
 
 # ==========================
