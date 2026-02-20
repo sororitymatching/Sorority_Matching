@@ -7,3 +7,5 @@ sentence-transformers
 xlsxwriter
 openpyxl
 st-gsheets-connection
+gspread
+oauth2client
