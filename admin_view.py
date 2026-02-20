@@ -47,6 +47,23 @@ def update_roster(names_list):
         return True
     except: return False
 
+def update_team_ranking(team_id, new_ranking):
+    """Finds the Team ID in the Bump Teams sheet and updates its ranking."""
+    try:
+        gc = get_gc()
+        sheet = gc.open(SHEET_NAME).worksheet("Bump Teams")
+        # Column E (index 5) is Team ID. Column F (index 6) is Ranking.
+        # Find the row where Column E matches the team_id
+        cell = sheet.find(str(team_id), in_column=5)
+        if cell:
+            # Update the cell to the immediate right (Column F)
+            sheet.update_cell(cell.row, 6, new_ranking)
+            return True
+        return False
+    except Exception as e:
+        st.error(f"Error updating ranking: {e}")
+        return False
+
 # --- MAIN PAGE ---
 st.set_page_config(page_title="Admin Dashboard", layout="wide")
 st.title("📊 Sorority Admin Dashboard")
@@ -88,22 +105,48 @@ else:
             except Exception as e:
                 st.error(f"Error reading CSV: {e}")
 
+    # --- TAB 2: VIEW BUMP TEAMS (ADMIN VIEW) ---
     with tab2:
-        if st.button("🔄 Refresh Teams"): st.rerun()
+        st.header("Bump Team Management")
+        
+        # LOAD DATA
         df_teams = get_data("Bump Teams")
         
         if not df_teams.empty:
-            # Search filter
-            search = st.text_input("🔍 Search Teams by Creator or Partner:")
+            # --- NEW: RANKING EDITOR ---
+            with st.expander("⭐ Assign/Update Team Rankings", expanded=True):
+                col_a, col_b, col_c = st.columns([2, 2, 1])
+                
+                with col_a:
+                    # Create a list of available Team IDs for the dropdown
+                    team_list = df_teams["Team ID"].tolist()
+                    selected_team = st.selectbox("Select Team ID to Rank:", team_list)
+                
+                with col_b:
+                    new_rank = st.number_input(f"Assign Rank for Team {selected_team}:", min_value=1, value=1)
+                
+                with col_c:
+                    st.markdown("<br>", unsafe_allow_html=True) # Align button
+                    if st.button("Save Rank"):
+                        if update_team_ranking(selected_team, new_rank):
+                            st.success(f"Rank {new_rank} assigned to Team {selected_team}!")
+                            st.rerun() # Refresh to show new rank in table
+
+            st.divider()
+
+            # SEARCH & TABLE
+            search = st.text_input("🔍 Search Teams:")
             if search:
-                # Search across multiple columns
                 mask = df_teams.apply(lambda x: x.astype(str).str.contains(search, case=False).any(), axis=1)
                 df_teams = df_teams[mask]
 
-            st.metric("Total Teams Created", len(df_teams))
-            st.dataframe(df_teams, use_container_width=True)
+            st.metric("Total Teams", len(df_teams))
+            
+            # Highlight rows that don't have a rank yet
+            st.dataframe(df_teams, use_container_width=True, hide_index=True)
+            
             csv_teams = df_teams.to_csv(index=False).encode('utf-8')
-            st.download_button("Download Bump Teams CSV", csv_teams, "bump_teams.csv", "text/csv")
+            st.download_button("Download Teams CSV", csv_teams, "bump_teams.csv", "text/csv")
         else:
             st.info("No bump teams found yet.")
 
