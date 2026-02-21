@@ -59,10 +59,10 @@ def get_party_options():
 @st.cache_data(ttl=300)
 def get_roster():
     """
-    Fetches the roster dynamically from the 'Config' sheet, Column D.
+    Fetches the roster dynamically from the 'Settings' sheet, Column D.
     """
     try:
-        sheet = get_sheet("Config")
+        sheet = get_sheet("Settings")
         if not sheet: return []
         
         names = sheet.col_values(4) 
@@ -119,7 +119,7 @@ pnm_list = get_pnm_list()
 party_options = get_party_options()
 
 if not roster:
-    st.warning("⚠️ Roster is empty. Please ensure the 'Config' sheet has names in Column D.")
+    st.warning("⚠️ Roster is empty. Please ensure the 'Settings' sheet has names in Column D.")
 
 # Tabs
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
