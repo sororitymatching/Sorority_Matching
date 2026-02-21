@@ -121,7 +121,7 @@ party_options = get_party_options()
 if not roster:
     st.warning("⚠️ Roster is empty. Please ensure the 'Config' sheet has names in Column D.")
 
-# Tabs - Updated to include "View PNM Information"
+# Tabs
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "My Information", 
     "Create Bump Team", 
@@ -161,17 +161,14 @@ with tab1:
             sheet = get_sheet("Member Information")
             if sheet:
                 try:
-                    # 1. Get all current values to calculate the next ID
                     all_rows = sheet.get_all_values()
-                    
                     if not all_rows:
-                        next_id = 1 # Completely empty sheet
+                        next_id = 1 
                     else:
                         next_id = len(all_rows) 
 
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     
-                    # 2. Append Data with generated ID
                     row_data = [
                         next_id, 
                         timestamp, 
@@ -257,13 +254,13 @@ with tab3:
                     st.error(f"Error saving excuse: {e}")
 
 # ==========================
-# TAB 4: VIEW PNM INFORMATION (NEW)
+# TAB 4: VIEW PNM INFORMATION (Modified)
 # ==========================
 with tab4:
     st.header("PNM Roster & Information")
-    st.markdown("View details about Potential New Members below.")
+    st.markdown("Use the dropdown to view a specific PNM or search the entire list.")
     
-    # Refresh button in case new PNMs are added during the session
+    # Refresh button
     if st.button("🔄 Refresh PNM List"):
         st.cache_data.clear()
         st.rerun()
@@ -271,17 +268,62 @@ with tab4:
     df_pnm = get_pnm_dataframe()
     
     if not df_pnm.empty:
-        # Search functionality
-        search_query = st.text_input("🔍 Search PNMs (Name, Hometown, etc.):", key="pnm_search_input")
+        # --- 1. Download Button ---
+        csv = df_pnm.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download All PNM Information (CSV)",
+            data=csv,
+            file_name="pnm_information.csv",
+            mime="text/csv",
+        )
+        st.divider()
+
+        # --- 2. Dropdown Setup ---
+        # Identify Name Column (Default to 2nd column if available, else 1st)
+        name_col_idx = 1 if len(df_pnm.columns) > 1 else 0
+        name_col_name = df_pnm.columns[name_col_idx]
         
-        if search_query:
-            # Case-insensitive search across all columns
-            mask = df_pnm.astype(str).apply(lambda x: x.str.contains(search_query, case=False)).any(axis=1)
-            display_df = df_pnm[mask]
-        else:
-            display_df = df_pnm
+        # Identify ID Column (Look for 'ID' or 'id', else use index)
+        id_col_name = next((c for c in df_pnm.columns if 'id' in c.lower()), None)
+        
+        # Create Options List: "ID - Name"
+        pnm_options = ["View All PNMs"]
+        pnm_map = {} # Map string back to dataframe index
+        
+        for idx, row in df_pnm.iterrows():
+            # Use row Index+1 if no specific ID column found
+            p_id = row[id_col_name] if id_col_name else (idx + 1)
+            p_name = row[name_col_name]
             
-        st.dataframe(display_df, use_container_width=True)
+            label = f"{p_id} - {p_name}"
+            pnm_options.append(label)
+            pnm_map[label] = idx
+
+        # Dropdown Widget
+        selected_view = st.selectbox("Select a PNM to view individual details:", pnm_options)
+
+        # --- 3. Display Logic ---
+        if selected_view == "View All PNMs":
+            # Show Search Bar & Full Table
+            search_query = st.text_input("🔍 Search All PNMs (Name, Hometown, etc.):", key="pnm_search_input")
+            
+            if search_query:
+                # Case-insensitive search
+                mask = df_pnm.astype(str).apply(lambda x: x.str.contains(search_query, case=False)).any(axis=1)
+                display_df = df_pnm[mask]
+            else:
+                display_df = df_pnm
+            
+            st.dataframe(display_df, use_container_width=True)
+            
+        else:
+            # Show Individual PNM
+            row_idx = pnm_map[selected_view]
+            display_df = df_pnm.iloc[[row_idx]]
+            
+            st.subheader(f"👤 {selected_view}")
+            st.dataframe(display_df, use_container_width=True)
+            
     else:
         st.info("No PNM information found. Please ensure the 'PNM Information' sheet is populated.")
 
