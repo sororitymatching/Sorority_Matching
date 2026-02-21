@@ -25,8 +25,8 @@ def get_data(worksheet_name):
         if not data: return pd.DataFrame()
         return pd.DataFrame(data[1:], columns=data[0])
     except Exception as e:
-        if worksheet_name == "Bump Teams":
-            st.warning("Could not find 'Bump Teams' tab. Please create it in Google Sheets.")
+        if worksheet_name == "PNM Information":
+             st.warning("Could not find 'PNM Information' tab.")
         return pd.DataFrame()
 
 def update_config(cell, value):
@@ -53,15 +53,37 @@ def update_team_ranking(team_id, new_ranking):
         gc = get_gc()
         sheet = gc.open(SHEET_NAME).worksheet("Bump Teams")
         # Column E (index 5) is Team ID. Column F (index 6) is Ranking.
-        # Find the row where Column E matches the team_id
         cell = sheet.find(str(team_id), in_column=5)
         if cell:
-            # Update the cell to the immediate right (Column F)
             sheet.update_cell(cell.row, 6, new_ranking)
             return True
         return False
     except Exception as e:
-        st.error(f"Error updating ranking: {e}")
+        st.error(f"Error updating team ranking: {e}")
+        return False
+
+def update_pnm_ranking(pnm_id, new_ranking):
+    """Finds the PNM ID in the PNM Information sheet and updates their ranking."""
+    try:
+        gc = get_gc()
+        sheet = gc.open(SHEET_NAME).worksheet("PNM Information")
+        
+        # Based on previous code: 
+        # PNM ID is the 24th item (Column X)
+        # Rank is the 25th item (Column Y)
+        # We search specifically in Column 24 to find the row.
+        cell = sheet.find(str(pnm_id), in_column=24)
+        
+        if cell:
+            # Update the cell in Column 25 (Rank) of the same row
+            sheet.update_cell(cell.row, 25, new_ranking)
+            return True
+        else:
+            st.error(f"Could not find PNM ID {pnm_id}")
+            return False
+            
+    except Exception as e:
+        st.error(f"Error updating PNM ranking: {e}")
         return False
 
 # --- MAIN PAGE ---
@@ -79,13 +101,13 @@ if not st.session_state.authenticated:
 else:
     st.success("Logged in as Admin")
 
-    # TABS
-    tab1, tab2, tab3 = st.tabs(["Settings & Roster", "View Bump Teams", "View Excuses"])
+    # TABS - Reordered as requested: Settings, PNM Rankings, Bump Teams, Excuses
+    tab1, tab2, tab3, tab4 = st.tabs(["Settings & Roster", "PNM Rankings", "View Bump Teams", "View Excuses"])
 
+    # --- TAB 1: SETTINGS ---
     with tab1:
         st.header("Event Configuration")
         
-        # Party Count
         with st.form("party_config"):
             count = st.number_input("Number of Parties", 1, 50, 4)
             if st.form_submit_button("Update Party Count"):
@@ -94,7 +116,6 @@ else:
         st.divider()
         st.header("Roster Management")
         
-        # Roster Upload
         file = st.file_uploader("Upload Member List (CSV)", type="csv")
         if file:
             try:
@@ -105,18 +126,77 @@ else:
             except Exception as e:
                 st.error(f"Error reading CSV: {e}")
 
-    # --- TAB 2: VIEW BUMP TEAMS (ADMIN VIEW) ---
+    # --- TAB 2: PNM RANKINGS (NEW) ---
     with tab2:
+        st.header("PNM Ranking Management")
+        
+        # Load Data
+        df_pnms = get_data("PNM Information")
+        
+        if not df_pnms.empty:
+            # Create Ranking Interface
+            with st.expander("⭐ Assign/Update PNM Rankings", expanded=True):
+                # Helper column for dropdown
+                # Assumes columns exist: 'PNM ID', 'Enter your name:'
+                # We rename 'Enter your name:' to 'Name' temporarily if needed, or just use the raw column name
+                name_col = "Enter your name:" if "Enter your name:" in df_pnms.columns else df_pnms.columns[1]
+                
+                df_pnms['display_label'] = df_pnms.apply(
+                    lambda x: f"ID: {x['PNM ID']} | {x[name_col]}", 
+                    axis=1
+                )
+                
+                col_p1, col_p2, col_p3 = st.columns([3, 1, 1])
+                
+                with col_p1:
+                    selected_pnm_label = st.selectbox("Select PNM to Rank:", df_pnms['display_label'].tolist())
+                    selected_pnm_id = df_pnms[df_pnms['display_label'] == selected_pnm_label]['PNM ID'].values[0]
+
+                with col_p2:
+                    # Get current rank
+                    current_pnm_rank = df_pnms[df_pnms['PNM ID'] == selected_pnm_id]['Average Recruit Rank'].values[0]
+                    # Handle empty strings or non-numbers
+                    try:
+                        initial_pnm_val = float(current_pnm_rank)
+                    except:
+                        initial_pnm_val = 0.0
+                    
+                    new_pnm_rank = st.number_input("Assign Rank:", min_value=0.0, max_value=5.0, value=initial_pnm_val, step=0.01, key="pnm_rank_input")
+
+                with col_p3:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("Save PNM Rank"):
+                        if update_pnm_ranking(selected_pnm_id, new_pnm_rank):
+                            st.success(f"Rank {new_pnm_rank} assigned to PNM {selected_pnm_id}!")
+                            st.rerun()
+
+            st.divider()
+
+            # Search & Table
+            pnm_search = st.text_input("🔍 Search PNMs:")
+            display_pnm_df = df_pnms.drop(columns=['display_label'])
+
+            if pnm_search:
+                mask = display_pnm_df.apply(lambda x: x.astype(str).str.contains(pnm_search, case=False).any(), axis=1)
+                display_pnm_df = display_pnm_df[mask]
+
+            st.metric("Total PNMs", len(display_pnm_df))
+            st.dataframe(display_pnm_df, use_container_width=True, hide_index=True)
+            
+            csv_pnms = display_pnm_df.to_csv(index=False).encode('utf-8')
+            st.download_button("Download PNM Data CSV", csv_pnms, "pnm_data.csv", "text/csv")
+        
+        else:
+            st.info("No PNM data found yet.")
+
+    # --- TAB 3: VIEW BUMP TEAMS ---
+    with tab3:
         st.header("Bump Team Management")
         
-        # LOAD DATA
         df_teams = get_data("Bump Teams")
         
         if not df_teams.empty:
-            # --- NEW: RANKING EDITOR ---
             with st.expander("⭐ Assign/Update Team Rankings", expanded=True):
-                # 1. Create a descriptive label for each team
-                # format: "ID: 1 | Members: Hailey Abbott, Sophie Adams..."
                 df_teams['display_label'] = df_teams.apply(
                     lambda x: f"Team {x['Team ID']} | {x['Creator Name']}, {x['Bump Partners']}", 
                     axis=1
@@ -125,32 +205,24 @@ else:
                 col_a, col_b, col_c = st.columns([3, 1, 1])
                 
                 with col_a:
-                    # Dropdown shows the full description, but we map it back to the ID
                     selected_label = st.selectbox("Select Team to Rank:", df_teams['display_label'].tolist())
-                    
-                    # Extract the actual Team ID from the selection to use for the update function
                     selected_team_id = df_teams[df_teams['display_label'] == selected_label]['Team ID'].values[0]
                 
                 with col_b:
-                    # Default the input to the current rank if it exists, otherwise 1
                     current_rank = df_teams[df_teams['Team ID'] == selected_team_id]['Ranking'].values[0]
                     initial_val = int(current_rank) if str(current_rank).isdigit() else 1
-                    
-                    new_rank = st.number_input(f"Assign Rank:", min_value=1, value=initial_val, key="rank_input")
+                    new_rank = st.number_input(f"Assign Rank:", min_value=1, value=initial_val, key="team_rank_input")
                 
                 with col_c:
-                    st.markdown("<br>", unsafe_allow_html=True) # Align button
-                    if st.button("Save Rank"):
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("Save Team Rank"):
                         if update_team_ranking(selected_team_id, new_rank):
                             st.success(f"Rank {new_rank} assigned!")
                             st.rerun() 
 
             st.divider()
-
-            # SEARCH & TABLE
-            search = st.text_input("🔍 Search Teams:")
             
-            # Remove the temporary display column before showing the table or downloading
+            search = st.text_input("🔍 Search Teams:")
             display_df = df_teams.drop(columns=['display_label'])
             
             if search:
@@ -165,13 +237,10 @@ else:
         else:
             st.info("No bump teams found yet.")
 
-    with tab3:
+    # --- TAB 4: VIEW EXCUSES ---
+    with tab4:
         if st.button("🔄 Refresh Excuses"): st.rerun()
-        # Assuming excuses are on the first sheet (Sheet1)
-        # Note: You can rename 'Sheet1' in your Google Sheet, but you must update code if you do.
-        # We'll assume the first sheet is always excuses.
         try:
-            gc = get_gc()
             df_excuses = get_data("Party Excuses")
         except:
             df_excuses = pd.DataFrame()
