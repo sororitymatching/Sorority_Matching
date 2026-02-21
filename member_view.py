@@ -317,12 +317,37 @@ with tab4:
             st.dataframe(display_df, use_container_width=True)
             
         else:
-            # Show Individual PNM
+            # Show Individual PNM with Better Formatting
             row_idx = pnm_map[selected_view]
-            display_df = df_pnm.iloc[[row_idx]]
+            pnm_data = df_pnm.iloc[row_idx]
             
-            st.subheader(f"👤 {selected_view}")
-            st.dataframe(display_df, use_container_width=True)
+            st.markdown(f"### 👤 Profile: {selected_view}")
+            st.divider()
+            
+            # --- Better Formatting: Key-Value Grid ---
+            # We will split the data into two columns for better readability
+            col1, col2 = st.columns(2)
+            
+            # Get all fields (columns)
+            fields = list(pnm_data.items())
+            
+            # Split fields roughly in half
+            mid_point = (len(fields) + 1) // 2
+            left_fields = fields[:mid_point]
+            right_fields = fields[mid_point:]
+            
+            with col1:
+                for label, value in left_fields:
+                    st.markdown(f"**{label}**")
+                    # Display value cleanly, handle empty strings
+                    val_str = str(value).strip()
+                    st.info(val_str if val_str else "N/A")
+                    
+            with col2:
+                for label, value in right_fields:
+                    st.markdown(f"**{label}**")
+                    val_str = str(value).strip()
+                    st.info(val_str if val_str else "N/A")
             
     else:
         st.info("No PNM information found. Please ensure the 'PNM Information' sheet is populated.")
