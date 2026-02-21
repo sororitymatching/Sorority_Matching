@@ -29,17 +29,17 @@ def get_data(worksheet_name):
              st.warning("Could not find 'PNM Information' tab.")
         return pd.DataFrame()
 
-def update_config(cell, value):
+def update_settings(cell, value):
     try:
         gc = get_gc()
-        gc.open(SHEET_NAME).worksheet("Config").update_acell(cell, value)
+        gc.open(SHEET_NAME).worksheet("Settings").update_acell(cell, value)
         return True
     except: return False
 
 def update_roster(names_list):
     try:
         gc = get_gc()
-        ws = gc.open(SHEET_NAME).worksheet("Config")
+        ws = gc.open(SHEET_NAME).worksheet("Settings")
         ws.batch_clear(["D2:D1000"])
         names_list.sort()
         formatted = [[n] for n in names_list if n.strip()]
@@ -115,7 +115,7 @@ else:
         with st.form("party_config"):
             count = st.number_input("Number of Parties", 1, 50, 4)
             if st.form_submit_button("Update Party Count"):
-                if update_config('B1', count): st.toast("Updated!")
+                if update_settings('B1', count): st.toast("Updated!")
         
         st.divider()
         st.header("Roster Management")
