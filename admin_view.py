@@ -68,14 +68,11 @@ def update_pnm_ranking(pnm_id, new_ranking):
         gc = get_gc()
         sheet = gc.open(SHEET_NAME).worksheet("PNM Information")
         
-        # Based on previous code: 
         # PNM ID is the 24th item (Column X)
         # Rank is the 25th item (Column Y)
-        # We search specifically in Column 24 to find the row.
         cell = sheet.find(str(pnm_id), in_column=24)
         
         if cell:
-            # Update the cell in Column 25 (Rank) of the same row
             sheet.update_cell(cell.row, 25, new_ranking)
             return True
         else:
@@ -101,8 +98,14 @@ if not st.session_state.authenticated:
 else:
     st.success("Logged in as Admin")
 
-    # TABS - Reordered as requested: Settings, PNM Rankings, Bump Teams, Excuses
-    tab1, tab2, tab3, tab4 = st.tabs(["Settings & Roster", "PNM Rankings", "View Bump Teams", "View Excuses"])
+    # TABS - Added "View Prior Connections" as the last tab
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "Settings & Roster", 
+        "PNM Rankings", 
+        "View Bump Teams", 
+        "View Excuses", 
+        "View Prior Connections"
+    ])
 
     # --- TAB 1: SETTINGS ---
     with tab1:
@@ -126,7 +129,7 @@ else:
             except Exception as e:
                 st.error(f"Error reading CSV: {e}")
 
-    # --- TAB 2: PNM RANKINGS (NEW) ---
+    # --- TAB 2: PNM RANKINGS ---
     with tab2:
         st.header("PNM Ranking Management")
         
@@ -137,8 +140,6 @@ else:
             # Create Ranking Interface
             with st.expander("⭐ Assign/Update PNM Rankings", expanded=True):
                 # Helper column for dropdown
-                # Assumes columns exist: 'PNM ID', 'Enter your name:'
-                # We rename 'Enter your name:' to 'Name' temporarily if needed, or just use the raw column name
                 name_col = "Enter your name:" if "Enter your name:" in df_pnms.columns else df_pnms.columns[1]
                 
                 df_pnms['display_label'] = df_pnms.apply(
@@ -153,9 +154,7 @@ else:
                     selected_pnm_id = df_pnms[df_pnms['display_label'] == selected_pnm_label]['PNM ID'].values[0]
 
                 with col_p2:
-                    # Get current rank
                     current_pnm_rank = df_pnms[df_pnms['PNM ID'] == selected_pnm_id]['Average Recruit Rank'].values[0]
-                    # Handle empty strings or non-numbers
                     try:
                         initial_pnm_val = float(current_pnm_rank)
                     except:
@@ -252,8 +251,29 @@ else:
         else:
             st.info("No excuses found.")
 
-    
-    
+    # --- TAB 5: VIEW PRIOR CONNECTIONS ---
+    with tab5:
+        st.header("Prior PNM Connections Log")
+        
+        if st.button("🔄 Refresh Connections"): st.rerun()
+        
+        try:
+            # Assumes the user form writes to "Prior Connections" tab
+            df_connections = get_data("Prior Connections")
+        except:
+            df_connections = pd.DataFrame()
 
+        if not df_connections.empty:
+            # Optional Search bar
+            search_conn = st.text_input("🔍 Search Connections (by Member or PNM):")
+            
+            if search_conn:
+                mask = df_connections.apply(lambda x: x.astype(str).str.contains(search_conn, case=False).any(), axis=1)
+                df_connections = df_connections[mask]
 
-
+            st.dataframe(df_connections, use_container_width=True)
+            
+            csv_conn = df_connections.to_csv(index=False).encode('utf-8')
+            st.download_button("Download Connections CSV", csv_conn, "prior_connections.csv", "text/csv")
+        else:
+            st.info("No prior connections found.")
