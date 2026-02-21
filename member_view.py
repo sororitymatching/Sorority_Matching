@@ -209,7 +209,7 @@ with tab3:
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     # Append Data: [Timestamp, Member Name, PNM Name, Connection Description]
                     sheet.append_row([timestamp, member_name, target_pnm])
-                    st.success(f"✅ Connection recorded for {target_pnm}!")
+                    st.success(f"✅ Connection recorded for {member_name}!")
                     st.balloons()
                 except Exception as e:
                     st.error(f"Error saving connection: {e}")
