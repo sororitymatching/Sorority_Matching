@@ -1,5 +1,6 @@
 import streamlit as st
 import gspread
+import pandas as pd
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 
@@ -91,6 +92,24 @@ def get_pnm_list():
         st.error(f"Error fetching PNMs: {e}")
         return []
 
+@st.cache_data(ttl=300)
+def get_pnm_dataframe():
+    """
+    Fetches all data from the 'PNM Information' sheet as a DataFrame.
+    """
+    try:
+        sheet = get_sheet("PNM Information")
+        if not sheet: return pd.DataFrame()
+        
+        data = sheet.get_all_values()
+        if not data: return pd.DataFrame()
+        
+        # Assume first row is header
+        return pd.DataFrame(data[1:], columns=data[0])
+    except Exception as e:
+        st.error(f"Error fetching PNM dataframe: {e}")
+        return pd.DataFrame()
+
 # --- MAIN APP LAYOUT ---
 st.title("Sorority Recruitment Portal")
 
@@ -102,8 +121,14 @@ party_options = get_party_options()
 if not roster:
     st.warning("⚠️ Roster is empty. Please ensure the 'Config' sheet has names in Column D.")
 
-# Tabs
-tab1, tab2, tab3, tab4 = st.tabs(["My Information", "Create Bump Team", "Party Excuses", "Prior PNM Connections"])
+# Tabs - Updated to include "View PNM Information"
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "My Information", 
+    "Create Bump Team", 
+    "Party Excuses", 
+    "View PNM Information", 
+    "Prior PNM Connections"
+])
 
 # ==========================
 # TAB 1: MY INFORMATION
@@ -130,7 +155,7 @@ with tab1:
         submit_info = st.form_submit_button(label='Save My Information')
         
     if submit_info:
-        if not member_name and not major and not year and not hometown and not hobbies and not college_inv and not hs_inv:
+        if not member_name:
              st.warning("⚠️ Please select your name.")
         else:
             sheet = get_sheet("Member Information")
@@ -139,25 +164,14 @@ with tab1:
                     # 1. Get all current values to calculate the next ID
                     all_rows = sheet.get_all_values()
                     
-                    # If empty (just created), start at 1. 
-                    # If it has a header, len is 1, so next ID is 1. 
-                    # If it has Header + 1 row, len is 2, next ID is 2.
-                    # Adjust logic if you want ID to start at 1 and Row 1 is header.
-                    
                     if not all_rows:
                         next_id = 1 # Completely empty sheet
                     else:
-                        # Assuming row 1 is header, so data starts at row 2.
-                        # The ID for the Nth data row is N.
-                        # len(all_rows) includes header. 
-                        # Example: Header only (len=1) -> next ID = 1.
-                        # Example: Header + ID 1 (len=2) -> next ID = 2.
                         next_id = len(all_rows) 
 
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     
                     # 2. Append Data with generated ID
-                    # Columns: [Sorority ID, Timestamp, Name, Major, Minor, Year, Hometown, Hobbies, College Inv, HS Inv]
                     row_data = [
                         next_id, 
                         timestamp, 
@@ -202,7 +216,6 @@ with tab2:
             if sheet:
                 try:
                     existing_data = sheet.get_all_values()
-                    # Similar logic for Bump Team ID
                     next_id = len(existing_data) if existing_data else 1
                     
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -244,9 +257,38 @@ with tab3:
                     st.error(f"Error saving excuse: {e}")
 
 # ==========================
-# TAB 4: PRIOR PNM CONNECTIONS
+# TAB 4: VIEW PNM INFORMATION (NEW)
 # ==========================
 with tab4:
+    st.header("PNM Roster & Information")
+    st.markdown("View details about Potential New Members below.")
+    
+    # Refresh button in case new PNMs are added during the session
+    if st.button("🔄 Refresh PNM List"):
+        st.cache_data.clear()
+        st.rerun()
+
+    df_pnm = get_pnm_dataframe()
+    
+    if not df_pnm.empty:
+        # Search functionality
+        search_query = st.text_input("🔍 Search PNMs (Name, Hometown, etc.):", key="pnm_search_input")
+        
+        if search_query:
+            # Case-insensitive search across all columns
+            mask = df_pnm.astype(str).apply(lambda x: x.str.contains(search_query, case=False)).any(axis=1)
+            display_df = df_pnm[mask]
+        else:
+            display_df = df_pnm
+            
+        st.dataframe(display_df, use_container_width=True)
+    else:
+        st.info("No PNM information found. Please ensure the 'PNM Information' sheet is populated.")
+
+# ==========================
+# TAB 5: PRIOR PNM CONNECTIONS
+# ==========================
+with tab5:
     st.header("Prior PNM Connections")
     st.markdown("Do you know a Potential New Member (PNM)? Let us know!")
 
