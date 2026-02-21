@@ -64,10 +64,7 @@ def get_roster():
         sheet = get_sheet("Config")
         if not sheet: return []
         
-        # Fetch Column D (index 4)
         names = sheet.col_values(4) 
-        
-        # Remove header if it exists
         if names and "Roster" in names[0]: 
             names = names[1:]
             
@@ -85,10 +82,7 @@ def get_pnm_list():
         sheet = get_sheet("PNM Information")
         if not sheet: return []
         
-        # Fetch Column B (index 2)
         pnm_names = sheet.col_values(2) 
-        
-        # Remove header if it exists
         if pnm_names and ("Name" in pnm_names[0] or "Enter" in pnm_names[0]):
             pnm_names = pnm_names[1:]
             
@@ -116,13 +110,11 @@ tab1, tab2, tab3, tab4 = st.tabs(["My Information", "Create Bump Team", "Party E
 # ==========================
 with tab1:
     st.header("My Member Information")
-    st.markdown("Please enter your details below (Majors, Hobbies, etc.).")
+    st.markdown("Please enter your details below. Your **Sorority ID** will be generated automatically upon submission.")
     
     with st.form(key='member_info_form'):
-        # Name Selection (Dynamic from Roster)
         member_name = st.selectbox("Your Name:", [""] + roster, key="info_name")
         
-        # Personal Details (Based on attached spreadsheet columns)
         col_a, col_b = st.columns(2)
         with col_a:
             major = st.text_input("Major")
@@ -141,18 +133,46 @@ with tab1:
         if not member_name:
              st.warning("⚠️ Please select your name.")
         else:
-            # We save to a sheet named "Member Information"
             sheet = get_sheet("Member Information")
             if sheet:
                 try:
+                    # 1. Get all current values to calculate the next ID
+                    all_rows = sheet.get_all_values()
+                    
+                    # If empty (just created), start at 1. 
+                    # If it has a header, len is 1, so next ID is 1. 
+                    # If it has Header + 1 row, len is 2, next ID is 2.
+                    # Adjust logic if you want ID to start at 1 and Row 1 is header.
+                    
+                    if not all_rows:
+                        next_id = 1 # Completely empty sheet
+                    else:
+                        # Assuming row 1 is header, so data starts at row 2.
+                        # The ID for the Nth data row is N.
+                        # len(all_rows) includes header. 
+                        # Example: Header only (len=1) -> next ID = 1.
+                        # Example: Header + ID 1 (len=2) -> next ID = 2.
+                        next_id = len(all_rows) 
+
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    # Append Data
+                    
+                    # 2. Append Data with generated ID
+                    # Columns: [Sorority ID, Timestamp, Name, Major, Minor, Year, Hometown, Hobbies, College Inv, HS Inv]
                     row_data = [
-                        timestamp, member_name, major, minor, year, 
-                        hometown, hobbies, college_inv, hs_inv
+                        next_id, 
+                        timestamp, 
+                        member_name, 
+                        major, 
+                        minor, 
+                        year, 
+                        hometown, 
+                        hobbies, 
+                        college_inv, 
+                        hs_inv
                     ]
                     sheet.append_row(row_data)
-                    st.success(f"✅ Information saved for {member_name}!")
+                    
+                    st.success(f"✅ Information saved for {member_name}! Your Sorority ID is: **{next_id}**")
                     st.balloons()
                 except Exception as e:
                     st.error(f"Error saving data: {e}")
@@ -182,7 +202,9 @@ with tab2:
             if sheet:
                 try:
                     existing_data = sheet.get_all_values()
+                    # Similar logic for Bump Team ID
                     next_id = len(existing_data) if existing_data else 1
+                    
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     partners_str = ", ".join(partners)
                     rgl_val = "" if rgl == "None" else rgl
