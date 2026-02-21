@@ -268,6 +268,15 @@ with tab4:
     df_pnm = get_pnm_dataframe()
     
     if not df_pnm.empty:
+        # --- FILTER COLUMNS ---
+        # Exclude timestamp and ranking columns (case-insensitive check)
+        cols_to_drop = [
+            c for c in df_pnm.columns 
+            if 'timestamp' in c.lower() or 'recruit rank' in c.lower() or 'average ranking' in c.lower()
+        ]
+        if cols_to_drop:
+            df_pnm = df_pnm.drop(columns=cols_to_drop)
+
         # --- 1. Download Button ---
         csv = df_pnm.to_csv(index=False).encode('utf-8')
         st.download_button(
@@ -325,7 +334,6 @@ with tab4:
             st.divider()
             
             # --- Better Formatting: Key-Value Grid ---
-            # We will split the data into two columns for better readability
             col1, col2 = st.columns(2)
             
             # Get all fields (columns)
@@ -339,7 +347,6 @@ with tab4:
             with col1:
                 for label, value in left_fields:
                     st.markdown(f"**{label}**")
-                    # Display value cleanly, handle empty strings
                     val_str = str(value).strip()
                     st.info(val_str if val_str else "N/A")
                     
