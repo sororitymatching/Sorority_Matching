@@ -94,7 +94,7 @@ with st.form(key='pnm_form'):
     col7, col8 = st.columns(2)
     with col7:
         hear_about = st.text_input("How did you hear about us?")
-        video_link = st.text_input("Enter your video link (optional):")
+        video_link = st.text_input("Enter your video link:")
         
     with col8:
         hobbies = st.text_area("Enter your hobbies and interests, separate by comma:")
