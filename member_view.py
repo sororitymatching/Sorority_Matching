@@ -130,7 +130,7 @@ with tab1:
         submit_info = st.form_submit_button(label='Save My Information')
         
     if submit_info:
-        if not member_name:
+        if not member_name and not major and not year and not hometown and not hobbies and not college_inv and not hs_inv:
              st.warning("⚠️ Please select your name.")
         else:
             sheet = get_sheet("Member Information")
