@@ -98,10 +98,11 @@ if not st.session_state.authenticated:
 else:
     st.success("Logged in as Admin")
 
-    # TABS - Added "View Prior Connections" as the last tab
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    # TABS - Added "Member Information" as the second tab
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "Settings & Roster", 
-        "PNM Rankings", 
+        "Member Information",
+        "PNM Information and Rankings", 
         "View Bump Teams", 
         "View Excuses", 
         "View Prior Connections"
@@ -129,8 +130,37 @@ else:
             except Exception as e:
                 st.error(f"Error reading CSV: {e}")
 
-    # --- TAB 2: PNM RANKINGS ---
+    # --- TAB 2: MEMBER INFORMATION (NEW) ---
     with tab2:
+        st.header("Member Information Database")
+        
+        if st.button("🔄 Refresh Member Data"): st.rerun()
+        
+        try:
+            df_members = get_data("Member Information")
+        except:
+            df_members = pd.DataFrame()
+            
+        if not df_members.empty:
+            # Search Bar
+            search_mem = st.text_input("🔍 Search Members:")
+            
+            if search_mem:
+                mask = df_members.apply(lambda x: x.astype(str).str.contains(search_mem, case=False).any(), axis=1)
+                display_df = df_members[mask]
+            else:
+                display_df = df_members
+
+            st.metric("Total Members Submitted", len(display_df))
+            st.dataframe(display_df, use_container_width=True)
+            
+            csv_mem = display_df.to_csv(index=False).encode('utf-8')
+            st.download_button("Download Member Data CSV", csv_mem, "member_info.csv", "text/csv")
+        else:
+            st.info("No member information found in 'Member Information' sheet.")
+
+    # --- TAB 3: PNM RANKINGS ---
+    with tab3:
         st.header("PNM Ranking Management")
         
         # Load Data
@@ -188,8 +218,8 @@ else:
         else:
             st.info("No PNM data found yet.")
 
-    # --- TAB 3: VIEW BUMP TEAMS ---
-    with tab3:
+    # --- TAB 4: VIEW BUMP TEAMS ---
+    with tab4:
         st.header("Bump Team Management")
         
         df_teams = get_data("Bump Teams")
@@ -236,8 +266,8 @@ else:
         else:
             st.info("No bump teams found yet.")
 
-    # --- TAB 4: VIEW EXCUSES ---
-    with tab4:
+    # --- TAB 5: VIEW EXCUSES ---
+    with tab5:
         if st.button("🔄 Refresh Excuses"): st.rerun()
         try:
             df_excuses = get_data("Party Excuses")
@@ -251,8 +281,8 @@ else:
         else:
             st.info("No excuses found.")
 
-    # --- TAB 5: VIEW PRIOR CONNECTIONS ---
-    with tab5:
+    # --- TAB 6: VIEW PRIOR CONNECTIONS ---
+    with tab6:
         st.header("Prior PNM Connections Log")
         
         if st.button("🔄 Refresh Connections"): st.rerun()
