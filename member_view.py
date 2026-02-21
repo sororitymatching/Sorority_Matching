@@ -41,7 +41,7 @@ def get_sheet(worksheet_name):
 @st.cache_data(ttl=60) 
 def get_party_options():
     try:
-        sheet = get_sheet("Setting")
+        sheet = get_sheet("Settings")
         if not sheet: return ["Party 1", "Party 2", "Party 3", "Party 4"]
         
         # Safely get B1 for number of parties
