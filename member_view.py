@@ -200,7 +200,7 @@ with tab3:
         submit_connection = st.form_submit_button(label='Submit Connection')
 
     if submit_connection:
-        if not member_name or not target_pnm or not connection_desc:
+        if not member_name or not target_pnm:
             st.warning("⚠️ Please fill in all fields.")
         else:
             sheet = get_sheet("Prior Connections")
