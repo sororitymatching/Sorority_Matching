@@ -196,8 +196,6 @@ with tab3:
         
         with col2:
             target_pnm = st.selectbox("PNM Name:", [""] + pnm_list, key="conn_pnm")
-
-        connection_desc = st.text_area("Describe your connection (e.g., High School friend, Camp, Cousin, etc.):")
         
         submit_connection = st.form_submit_button(label='Submit Connection')
 
@@ -210,7 +208,7 @@ with tab3:
                 try:
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     # Append Data: [Timestamp, Member Name, PNM Name, Connection Description]
-                    sheet.append_row([timestamp, member_name, target_pnm, connection_desc])
+                    sheet.append_row([timestamp, member_name, target_pnm])
                     st.success(f"✅ Connection recorded for {target_pnm}!")
                     st.balloons()
                 except Exception as e:
