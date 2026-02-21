@@ -6,13 +6,11 @@ from datetime import datetime
 # --- CONFIGURATION ---
 SHEET_NAME = "OverallMatchingInformation"
 
-# --- AUTHENTICATION & CONNECTION (Fixed Caching) ---
-
+# --- AUTHENTICATION & CONNECTION ---
 @st.cache_resource
 def get_gspread_client():
     """
     Cached resource to prevent re-authenticating on every run.
-    This prevents Google API Quota errors.
     """
     try:
         scope = [
@@ -34,10 +32,10 @@ def get_sheet(worksheet_name):
     try:
         return client.open(SHEET_NAME).worksheet(worksheet_name)
     except Exception as e:
-        st.error(f"❌ Worksheet '{worksheet_name}' not found. Please create it in Google Sheets.")
+        st.error(f"❌ Worksheet '{worksheet_name}' not found. Please create it in your Google Spreadsheet.")
         return None
 
-# --- DATA FETCHING ---
+# --- DATA FETCHING (Dynamic) ---
 
 @st.cache_data(ttl=60) 
 def get_party_options():
@@ -45,12 +43,12 @@ def get_party_options():
         sheet = get_sheet("Config")
         if not sheet: return ["Party 1", "Party 2", "Party 3", "Party 4"]
         
-        # Safely get B1
+        # Safely get B1 for number of parties
         val = sheet.acell('B1').value
         if val and val.isdigit():
             num_parties = int(val)
         else:
-            num_parties = 4 # Default
+            num_parties = 4 
             
         options = [f"Party {i+1}" for i in range(num_parties)]
         return options
@@ -59,72 +57,119 @@ def get_party_options():
 
 @st.cache_data(ttl=300)
 def get_roster():
+    """
+    Fetches the roster dynamically from the 'Config' sheet, Column D.
+    """
     try:
         sheet = get_sheet("Config")
         if not sheet: return []
         
-        names = sheet.col_values(4) # Column D
+        # Fetch Column D (index 4)
+        names = sheet.col_values(4) 
+        
         # Remove header if it exists
         if names and "Roster" in names[0]: 
             names = names[1:]
             
         return sorted([n for n in names if n.strip()])
-    except:
+    except Exception as e:
+        st.error(f"Error fetching roster: {e}")
         return []
 
 @st.cache_data(ttl=300)
 def get_pnm_list():
     """
-    Fetches the list of PNM names from the 'PNM Information' sheet.
-    Assumes 'Enter your name:' is the 2nd column (Column B).
+    Fetches the list of PNM names from the 'PNM Information' sheet, Column B.
     """
     try:
         sheet = get_sheet("PNM Information")
         if not sheet: return []
         
-        # Get all records to find the specific column or just pull Column B
-        # Standard approach: Pull column B directly
+        # Fetch Column B (index 2)
         pnm_names = sheet.col_values(2) 
         
-        # Remove header if it exists (assuming 'Enter your name:' or similar is row 1)
+        # Remove header if it exists
         if pnm_names and ("Name" in pnm_names[0] or "Enter" in pnm_names[0]):
             pnm_names = pnm_names[1:]
             
         return sorted([n for n in pnm_names if n.strip()])
     except Exception as e:
-        # Silently fail or log debug
-        print(f"Error fetching PNMs: {e}")
+        st.error(f"Error fetching PNMs: {e}")
         return []
 
 # --- MAIN APP LAYOUT ---
 st.title("Sorority Recruitment Portal")
 
-# Load data
+# Load data dynamically
 roster = get_roster()
 pnm_list = get_pnm_list()
 party_options = get_party_options()
 
 if not roster:
-    st.warning("⚠️ Roster is empty. Please ask an Admin to upload the roster in the settings tab.")
+    st.warning("⚠️ Roster is empty. Please ensure the 'Config' sheet has names in Column D.")
 
-tab1, tab2, tab3 = st.tabs(["Create Bump Team", "Party Excuses", "Prior PNM Connections"])
+# Tabs
+tab1, tab2, tab3, tab4 = st.tabs(["My Information", "Create Bump Team", "Party Excuses", "Prior PNM Connections"])
 
 # ==========================
-# TAB 1: BUMP TEAM CREATION
+# TAB 1: MY INFORMATION
 # ==========================
 with tab1:
+    st.header("My Member Information")
+    st.markdown("Please enter your details below (Majors, Hobbies, etc.).")
+    
+    with st.form(key='member_info_form'):
+        # Name Selection (Dynamic from Roster)
+        member_name = st.selectbox("Your Name:", [""] + roster, key="info_name")
+        
+        # Personal Details (Based on attached spreadsheet columns)
+        col_a, col_b = st.columns(2)
+        with col_a:
+            major = st.text_input("Major")
+            minor = st.text_input("Minor")
+        with col_b:
+            year = st.selectbox("Year", ["Sophomore", "Junior", "Senior"])
+            hometown = st.text_input("Hometown (City, State)")
+            
+        hobbies = st.text_area("Hobbies")
+        college_inv = st.text_area("College Involvement")
+        hs_inv = st.text_area("High School Involvement")
+        
+        submit_info = st.form_submit_button(label='Save My Information')
+        
+    if submit_info:
+        if not member_name:
+             st.warning("⚠️ Please select your name.")
+        else:
+            # We save to a sheet named "Member Information"
+            sheet = get_sheet("Member Information")
+            if sheet:
+                try:
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    # Append Data
+                    row_data = [
+                        timestamp, member_name, major, minor, year, 
+                        hometown, hobbies, college_inv, hs_inv
+                    ]
+                    sheet.append_row(row_data)
+                    st.success(f"✅ Information saved for {member_name}!")
+                    st.balloons()
+                except Exception as e:
+                    st.error(f"Error saving data: {e}")
+            else:
+                st.error("Could not find 'Member Information' sheet. Please create it.")
+
+# ==========================
+# TAB 2: BUMP TEAM CREATION
+# ==========================
+with tab2:
     st.header("Bump Team Creation")
     st.markdown("Select your partners and RGL to form a bump team.")
 
     with st.form(key='bump_form'):
-        # 1. Creator Name
         creator_name = st.selectbox("Choose your name:", [""] + roster, key="bump_creator")
-        
-        # 2. Partners
         partner_options = [n for n in roster if n != creator_name] if creator_name else roster
         partners = st.multiselect("Choose your bump partner(s):", partner_options)
-        
-        # 3. RGL
         rgl = st.selectbox("Choose your Bump Group Leader (RGL):", ["None"] + roster)
 
         submit_bump = st.form_submit_button(label='Submit Bump Team')
@@ -136,28 +181,23 @@ with tab1:
             sheet = get_sheet("Bump Teams")
             if sheet:
                 try:
-                    # Calculate ID based on existing rows
                     existing_data = sheet.get_all_values()
                     next_id = len(existing_data) if existing_data else 1
-                    
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     partners_str = ", ".join(partners)
                     rgl_val = "" if rgl == "None" else rgl
                     
-                    # Columns: [Timestamp, Creator, Partners, RGL, ID, Ranking]
                     row_data = [timestamp, creator_name, partners_str, rgl_val, next_id, ""] 
-                    
                     sheet.append_row(row_data)
-                    
                     st.success(f"✅ Bump Team #{next_id} submitted successfully!")
                     st.balloons()
                 except Exception as e:
                     st.error(f"Error saving data: {e}")
 
 # ==========================
-# TAB 2: PARTY EXCUSES
+# TAB 3: PARTY EXCUSES
 # ==========================
-with tab2:
+with tab3:
     st.header("Recruitment Party Excuse Form")
     st.markdown("Please fill out this form if you cannot attend a specific party.")
 
@@ -182,18 +222,16 @@ with tab2:
                     st.error(f"Error saving excuse: {e}")
 
 # ==========================
-# TAB 3: PRIOR PNM CONNECTIONS
+# TAB 4: PRIOR PNM CONNECTIONS
 # ==========================
-with tab3:
+with tab4:
     st.header("Prior PNM Connections")
     st.markdown("Do you know a Potential New Member (PNM)? Let us know!")
 
     with st.form(key='connection_form'):
         col1, col2 = st.columns(2)
-        
         with col1:
             member_name = st.selectbox("Your Name (Member):", [""] + roster, key="conn_member")
-        
         with col2:
             target_pnm = st.selectbox("PNM Name:", [""] + pnm_list, key="conn_pnm")
         
@@ -207,7 +245,6 @@ with tab3:
             if sheet:
                 try:
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    # Append Data: [Timestamp, Member Name, PNM Name, Connection Description]
                     sheet.append_row([timestamp, member_name, target_pnm])
                     st.success(f"✅ Connection recorded for {member_name}!")
                     st.balloons()
