@@ -16,7 +16,6 @@ def get_google_sheet_connection():
     ]
     
     # Load credentials from Streamlit secrets
-    # This expects a secrets.toml file with a [gcp_service_account] section
     try:
         credentials = Credentials.from_service_account_info(
             st.secrets["gcp_service_account"], scopes=scope
@@ -47,7 +46,6 @@ with st.form(key='pnm_form'):
         year = st.selectbox("Pick your year in school:", 
                             ["Freshman", "Sophomore", "Junior", "Senior"])
         email = st.text_input("Enter your Penn State email (psu.edu):")
-        # Basic validation visual
         if email and "@psu.edu" not in email:
             st.warning("Please ensure you use your @psu.edu email.")
 
@@ -112,11 +110,15 @@ if submit_button:
         if client:
             try:
                 # Open the Google Sheet
-                # Note: Ensure the file name matches exactly what is in your Drive
                 sheet = client.open("OverallMatchingInformation").worksheet("PNM Information")
                 
-                # Prepare row data matching the CSV order
-                # Note: We omit PNM ID and Average Recruit Rank as they are likely internal/calculated fields
+                # --- CALCULATE PNM ID ---
+                # Fetch all values in the first column (Timestamp) to determine the row count
+                # If only the header exists (1 row), the length is 1, so the first ID will be 1
+                existing_rows = sheet.col_values(1)
+                new_pnm_id = len(existing_rows) 
+                
+                # Prepare row data
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
                 row_data = [
@@ -143,14 +145,14 @@ if submit_button:
                     hear_about,
                     video_link,
                     hobbies,
-                    "", # Placeholder for PNM ID (Calculated internally)
-                    ""  # Placeholder for Average Recruit Rank (Calculated internally)
+                    new_pnm_id, # Automatically calculated ID
+                    ""          # Placeholder for Average Recruit Rank
                 ]
                 
                 # Append to sheet
                 sheet.append_row(row_data)
                 
-                st.success(f"Thank you, {name}! Your information has been recorded.")
+                st.success(f"Thank you, {name}! Your information has been recorded. (PNM ID: {new_pnm_id})")
                 st.balloons()
                 
             except gspread.exceptions.WorksheetNotFound:
