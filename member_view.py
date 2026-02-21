@@ -72,17 +72,42 @@ def get_roster():
     except:
         return []
 
+@st.cache_data(ttl=300)
+def get_pnm_list():
+    """
+    Fetches the list of PNM names from the 'PNM Information' sheet.
+    Assumes 'Enter your name:' is the 2nd column (Column B).
+    """
+    try:
+        sheet = get_sheet("PNM Information")
+        if not sheet: return []
+        
+        # Get all records to find the specific column or just pull Column B
+        # Standard approach: Pull column B directly
+        pnm_names = sheet.col_values(2) 
+        
+        # Remove header if it exists (assuming 'Enter your name:' or similar is row 1)
+        if pnm_names and ("Name" in pnm_names[0] or "Enter" in pnm_names[0]):
+            pnm_names = pnm_names[1:]
+            
+        return sorted([n for n in pnm_names if n.strip()])
+    except Exception as e:
+        # Silently fail or log debug
+        print(f"Error fetching PNMs: {e}")
+        return []
+
 # --- MAIN APP LAYOUT ---
 st.title("Sorority Recruitment Portal")
 
 # Load data
 roster = get_roster()
+pnm_list = get_pnm_list()
 party_options = get_party_options()
 
 if not roster:
     st.warning("⚠️ Roster is empty. Please ask an Admin to upload the roster in the settings tab.")
 
-tab1, tab2 = st.tabs(["Create Bump Team", "Party Excuses"])
+tab1, tab2, tab3 = st.tabs(["Create Bump Team", "Party Excuses", "Prior PNM Connections"])
 
 # ==========================
 # TAB 1: BUMP TEAM CREATION
@@ -112,20 +137,14 @@ with tab1:
             if sheet:
                 try:
                     # Calculate ID based on existing rows
-                    # Assuming Row 1 is headers. If sheet is empty, ID is 1.
                     existing_data = sheet.get_all_values()
                     next_id = len(existing_data) if existing_data else 1
-                    
-                    # If headers exist (len > 0), the first data row is ID 1
-                    # If headers don't exist, we might overwrite. 
-                    # Safer to just use len(existing_data) as the ID (assuming header row exists)
                     
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     partners_str = ", ".join(partners)
                     rgl_val = "" if rgl == "None" else rgl
                     
                     # Columns: [Timestamp, Creator, Partners, RGL, ID, Ranking]
-                    # Admin panel expects ID at index 4 (Column E) and Ranking at index 5 (Column F)
                     row_data = [timestamp, creator_name, partners_str, rgl_val, next_id, ""] 
                     
                     sheet.append_row(row_data)
@@ -161,3 +180,38 @@ with tab2:
                     st.balloons()
                 except Exception as e:
                     st.error(f"Error saving excuse: {e}")
+
+# ==========================
+# TAB 3: PRIOR PNM CONNECTIONS
+# ==========================
+with tab3:
+    st.header("Prior PNM Connections")
+    st.markdown("Do you know a Potential New Member (PNM)? Let us know!")
+
+    with st.form(key='connection_form'):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            member_name = st.selectbox("Your Name (Member):", [""] + roster, key="conn_member")
+        
+        with col2:
+            target_pnm = st.selectbox("PNM Name:", [""] + pnm_list, key="conn_pnm")
+
+        connection_desc = st.text_area("Describe your connection (e.g., High School friend, Camp, Cousin, etc.):")
+        
+        submit_connection = st.form_submit_button(label='Submit Connection')
+
+    if submit_connection:
+        if not member_name or not target_pnm or not connection_desc:
+            st.warning("⚠️ Please fill in all fields.")
+        else:
+            sheet = get_sheet("Prior Connections")
+            if sheet:
+                try:
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    # Append Data: [Timestamp, Member Name, PNM Name, Connection Description]
+                    sheet.append_row([timestamp, member_name, target_pnm, connection_desc])
+                    st.success(f"✅ Connection recorded for {target_pnm}!")
+                    st.balloons()
+                except Exception as e:
+                    st.error(f"Error saving connection: {e}")
