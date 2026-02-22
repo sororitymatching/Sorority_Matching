@@ -32,7 +32,6 @@ def get_data(worksheet_name):
 def update_settings(cell, value):
     try:
         gc = get_gc()
-        # Ensure your sheet is named 'Settings' or change to 'Config' if needed
         gc.open(SHEET_NAME).worksheet("Settings").update_acell(cell, value)
         return True
     except: return False
@@ -40,7 +39,6 @@ def update_settings(cell, value):
 def update_roster(names_list):
     try:
         gc = get_gc()
-        # Updates the Roster in the 'Settings' tab, Column D
         ws = gc.open(SHEET_NAME).worksheet("Settings")
         ws.batch_clear(["D2:D1000"])
         names_list.sort()
@@ -72,13 +70,14 @@ def update_pnm_ranking(pnm_id, new_ranking):
         
         # PNM ID is the 24th item (Column X)
         # Rank is the 25th item (Column Y)
+        # Note: If your sheet structure changes, these indices might need adjustment.
         cell = sheet.find(str(pnm_id), in_column=24)
         
         if cell:
             sheet.update_cell(cell.row, 25, new_ranking)
             return True
         else:
-            st.error(f"Could not find PNM ID {pnm_id}")
+            st.error(f"Could not find PNM ID {pnm_id} in 'PNM Information' sheet.")
             return False
             
     except Exception as e:
@@ -110,7 +109,7 @@ else:
         "View Prior Connections"
     ])
 
-    # --- TAB 1: SETTINGS & ROSTER ---
+    # --- TAB 1: SETTINGS ---
     with tab1:
         st.header("Event Configuration")
         
@@ -124,188 +123,183 @@ else:
         
         col_r1, col_r2 = st.columns(2)
         
-        # --- Option A: Sync from Member Information Sheet ---
         with col_r1:
             st.subheader("Option A: Sync from Sheet")
             st.info("Pull names directly from the 'Member Information' tab.")
-            
             if st.button("🔄 Sync Roster from 'Member Information'"):
                 df_source = get_data("Member Information")
-                
                 if not df_source.empty:
-                    # Attempt to find the "Full Name" or "Name" column
                     possible_cols = ["Full Name", "Name", "Member Name", "Member"]
                     found_col = None
-                    
                     for col in possible_cols:
-                        # Case-insensitive match
                         match = next((c for c in df_source.columns if c.lower() == col.lower()), None)
                         if match:
                             found_col = match
                             break
-                    
                     if found_col:
-                        # Extract unique names
                         names = df_source[found_col].astype(str).unique().tolist()
-                        names = [n for n in names if n.strip()] # Remove empty/whitespace
-                        
+                        names = [n for n in names if n.strip()] 
                         if update_roster(names):
-                            st.success(f"✅ Successfully synced {len(names)} members from column '{found_col}'!")
+                            st.success(f"✅ Successfully synced {len(names)} members!")
                         else:
-                            st.error("Failed to update the Settings sheet.")
+                            st.error("Failed to update Settings.")
                     else:
-                        st.error(f"Could not find a name column in 'Member Information'. Searched for: {', '.join(possible_cols)}")
+                        st.error(f"Could not find name column. Searched: {possible_cols}")
                 else:
-                    st.error("The 'Member Information' sheet appears to be empty or missing.")
+                    st.error("'Member Information' sheet is empty.")
 
-        # --- Option B: Upload CSV ---
         with col_r2:
             st.subheader("Option B: Upload CSV")
-            st.info("Upload a CSV file containing a list of names.")
-            
             file = st.file_uploader("Upload Member List (CSV)", type="csv")
             if file:
                 try:
                     new_names = pd.read_csv(file, header=None)[0].astype(str).tolist()
-                    st.write(f"Preview: {new_names[:3]}...")
                     if st.button("Replace Roster with CSV"):
-                        if update_roster(new_names): st.toast("Roster Updated Successfully!")
+                        if update_roster(new_names): st.toast("Roster Updated!")
                 except Exception as e:
                     st.error(f"Error reading CSV: {e}")
 
     # --- TAB 2: MEMBER INFORMATION ---
     with tab2:
         st.header("Member Information Database")
-        
         if st.button("🔄 Refresh Member Data"): st.rerun()
-        
         try:
             df_members = get_data("Member Information")
         except:
             df_members = pd.DataFrame()
             
         if not df_members.empty:
-            # Search Bar
             search_mem = st.text_input("🔍 Search Members:")
-            
             if search_mem:
                 mask = df_members.apply(lambda x: x.astype(str).str.contains(search_mem, case=False).any(), axis=1)
                 display_df = df_members[mask]
             else:
                 display_df = df_members
-
-            st.metric("Total Members Submitted", len(display_df))
+            st.metric("Total Members", len(display_df))
             st.dataframe(display_df, use_container_width=True)
-            
             csv_mem = display_df.to_csv(index=False).encode('utf-8')
-            st.download_button("Download Member Data CSV", csv_mem, "member_info.csv", "text/csv")
+            st.download_button("Download CSV", csv_mem, "member_info.csv", "text/csv")
         else:
-            st.info("No member information found in 'Member Information' sheet.")
+            st.info("No member information found.")
 
-    # --- TAB 3: PNM RANKINGS ---
+    # --- TAB 3: PNM RANKINGS (MODIFIED) ---
     with tab3:
         st.header("PNM Ranking Management")
         
-        # Load Data
+        st.subheader("🏆 Average Rankings (from Member Votes)")
+        
+        # 1. Fetch Rankings from 'PNM Rankings' sheet
+        df_votes = get_data("PNM Rankings")
+        
+        if not df_votes.empty:
+            try:
+                # Ensure Score is numeric
+                df_votes['Score'] = pd.to_numeric(df_votes['Score'], errors='coerce')
+                
+                # Check for required columns
+                if 'PNM ID' in df_votes.columns and 'Score' in df_votes.columns:
+                    
+                    # 2. Calculate Averages
+                    # Group by ID (and Name for display purposes)
+                    # We use 'first' for Name just to grab the label
+                    group_cols = ['PNM ID']
+                    if 'PNM Name' in df_votes.columns:
+                        group_cols.append('PNM Name')
+                        
+                    avg_df = df_votes.groupby(group_cols)['Score'].mean().reset_index()
+                    avg_df.rename(columns={'Score': 'Calculated Average'}, inplace=True)
+                    
+                    # Sort by score descending
+                    avg_df = avg_df.sort_values(by='Calculated Average', ascending=False)
+                    
+                    st.info(f"Found {len(df_votes)} total votes for {len(avg_df)} unique PNMs.")
+                    st.dataframe(avg_df, use_container_width=True)
+                    
+                    # 3. Sync Button
+                    if st.button("🚀 Sync Calculated Averages to 'PNM Information' Sheet"):
+                        progress_bar = st.progress(0, text="Starting update...")
+                        total_pnms = len(avg_df)
+                        success_count = 0
+                        
+                        for idx, row in avg_df.iterrows():
+                            pnm_id = row['PNM ID']
+                            # Round to 2 decimal places
+                            new_score = round(row['Calculated Average'], 2)
+                            
+                            # Call existing helper to update the main sheet
+                            if update_pnm_ranking(pnm_id, new_score):
+                                success_count += 1
+                            
+                            # Update progress
+                            progress_bar.progress((idx + 1) / total_pnms, text=f"Updating PNM ID {pnm_id}...")
+                            
+                        progress_bar.empty()
+                        st.success(f"✅ Successfully updated rankings for {success_count} PNMs!")
+                        st.rerun()
+                else:
+                    st.error("Missing columns 'PNM ID' or 'Score' in 'PNM Rankings' sheet.")
+                    st.write("Columns found:", df_votes.columns.tolist())
+                    
+            except Exception as e:
+                st.error(f"Error processing rankings: {e}")
+        else:
+            st.info("No votes found in 'PNM Rankings' sheet yet.")
+
+        st.divider()
+        st.subheader("📋 Current PNM Database")
+        
+        # Load Existing PNM Data
         df_pnms = get_data("PNM Information")
         
         if not df_pnms.empty:
-            # Create Ranking Interface
-            with st.expander("⭐ Assign/Update PNM Rankings", expanded=True):
-                # Helper column for dropdown
-                name_col = "Enter your name:" if "Enter your name:" in df_pnms.columns else df_pnms.columns[1]
-                
-                df_pnms['display_label'] = df_pnms.apply(
-                    lambda x: f"ID: {x['PNM ID']} | {x[name_col]}", 
-                    axis=1
-                )
-                
-                col_p1, col_p2, col_p3 = st.columns([3, 1, 1])
-                
-                with col_p1:
-                    selected_pnm_label = st.selectbox("Select PNM to Rank:", df_pnms['display_label'].tolist())
-                    selected_pnm_id = df_pnms[df_pnms['display_label'] == selected_pnm_label]['PNM ID'].values[0]
-
-                with col_p2:
-                    current_pnm_rank = df_pnms[df_pnms['PNM ID'] == selected_pnm_id]['Average Recruit Rank'].values[0]
-                    try:
-                        initial_pnm_val = float(current_pnm_rank)
-                    except:
-                        initial_pnm_val = 0.0
-                    
-                    new_pnm_rank = st.number_input("Assign Rank:", min_value=0.0, max_value=5.0, value=initial_pnm_val, step=0.01, key="pnm_rank_input")
-
-                with col_p3:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    if st.button("Save PNM Rank"):
-                        if update_pnm_ranking(selected_pnm_id, new_pnm_rank):
-                            st.success(f"Rank {new_pnm_rank} assigned to PNM {selected_pnm_id}!")
-                            st.rerun()
-
-            st.divider()
-
-            # Search & Table
-            pnm_search = st.text_input("🔍 Search PNMs:")
-            display_pnm_df = df_pnms.drop(columns=['display_label'])
-
+            pnm_search = st.text_input("🔍 Search PNM Database:")
             if pnm_search:
-                mask = display_pnm_df.apply(lambda x: x.astype(str).str.contains(pnm_search, case=False).any(), axis=1)
-                display_pnm_df = display_pnm_df[mask]
+                mask = df_pnms.astype(str).apply(lambda x: x.str.contains(pnm_search, case=False).any(), axis=1)
+                display_pnm_df = df_pnms[mask]
+            else:
+                display_pnm_df = df_pnms
 
-            st.metric("Total PNMs", len(display_pnm_df))
-            st.dataframe(display_pnm_df, use_container_width=True, hide_index=True)
+            st.dataframe(display_pnm_df, use_container_width=True)
             
             csv_pnms = display_pnm_df.to_csv(index=False).encode('utf-8')
             st.download_button("Download PNM Data CSV", csv_pnms, "pnm_data.csv", "text/csv")
-        
         else:
-            st.info("No PNM data found yet.")
+            st.info("No PNM data found.")
 
     # --- TAB 4: VIEW BUMP TEAMS ---
     with tab4:
         st.header("Bump Team Management")
-        
         df_teams = get_data("Bump Teams")
-        
         if not df_teams.empty:
             with st.expander("⭐ Assign/Update Team Rankings", expanded=True):
                 df_teams['display_label'] = df_teams.apply(
                     lambda x: f"Team {x['Team ID']} | {x['Creator Name']}, {x['Bump Partners']}", 
                     axis=1
                 )
-                
                 col_a, col_b, col_c = st.columns([3, 1, 1])
-                
                 with col_a:
                     selected_label = st.selectbox("Select Team to Rank:", df_teams['display_label'].tolist())
                     selected_team_id = df_teams[df_teams['display_label'] == selected_label]['Team ID'].values[0]
-                
                 with col_b:
                     current_rank = df_teams[df_teams['Team ID'] == selected_team_id]['Ranking'].values[0]
                     initial_val = int(current_rank) if str(current_rank).isdigit() else 1
                     new_rank = st.number_input(f"Assign Rank:", min_value=1, value=initial_val, key="team_rank_input")
-                
                 with col_c:
                     st.markdown("<br>", unsafe_allow_html=True)
                     if st.button("Save Team Rank"):
                         if update_team_ranking(selected_team_id, new_rank):
                             st.success(f"Rank {new_rank} assigned!")
                             st.rerun() 
-
             st.divider()
-            
             search = st.text_input("🔍 Search Teams:")
             display_df = df_teams.drop(columns=['display_label'])
-            
             if search:
                 mask = display_df.apply(lambda x: x.astype(str).str.contains(search, case=False).any(), axis=1)
                 display_df = display_df[mask]
-
             st.metric("Total Teams", len(display_df))
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
-            
+            st.dataframe(display_df, use_container_width=True)
             csv_teams = display_df.to_csv(index=False).encode('utf-8')
-            st.download_button("Download Teams CSV", csv_teams, "bump_teams.csv", "text/csv")
+            st.download_button("Download CSV", csv_teams, "bump_teams.csv", "text/csv")
         else:
             st.info("No bump teams found yet.")
 
@@ -316,37 +310,28 @@ else:
             df_excuses = get_data("Party Excuses")
         except:
             df_excuses = pd.DataFrame()
-
         if not df_excuses.empty:
             st.dataframe(df_excuses, use_container_width=True)
             csv = df_excuses.to_csv(index=False).encode('utf-8')
-            st.download_button("Download Excuses CSV", csv, "excuses.csv", "text/csv")
+            st.download_button("Download CSV", csv, "excuses.csv", "text/csv")
         else:
             st.info("No excuses found.")
 
     # --- TAB 6: VIEW PRIOR CONNECTIONS ---
     with tab6:
         st.header("Prior PNM Connections Log")
-        
         if st.button("🔄 Refresh Connections"): st.rerun()
-        
         try:
-            # Assumes the user form writes to "Prior Connections" tab
             df_connections = get_data("Prior Connections")
         except:
             df_connections = pd.DataFrame()
-
         if not df_connections.empty:
-            # Optional Search bar
-            search_conn = st.text_input("🔍 Search Connections (by Member or PNM):")
-            
+            search_conn = st.text_input("🔍 Search Connections:")
             if search_conn:
                 mask = df_connections.apply(lambda x: x.astype(str).str.contains(search_conn, case=False).any(), axis=1)
                 df_connections = df_connections[mask]
-
             st.dataframe(df_connections, use_container_width=True)
-            
             csv_conn = df_connections.to_csv(index=False).encode('utf-8')
-            st.download_button("Download Connections CSV", csv_conn, "prior_connections.csv", "text/csv")
+            st.download_button("Download CSV", csv_conn, "prior_connections.csv", "text/csv")
         else:
             st.info("No prior connections found.")
