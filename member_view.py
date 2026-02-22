@@ -428,8 +428,6 @@ with tab5:
             if sheet_conn and sheet_mem and sheet_pnm:
                 try:
                     # 1. FIND MEMBER ID
-                    # "Member Information": [ID, Timestamp, Name, ...]
-                    # We assume ID is col 0, Name is col 2
                     mem_rows = sheet_mem.get_all_values()
                     member_id = "Unknown"
                     for row in mem_rows:
@@ -439,23 +437,26 @@ with tab5:
                                 break
 
                     # 2. FIND PNM ID
-                    # "PNM Information": [Timestamp, ID, Name, ...] or [ID, Name, ...]
-                    # We'll rely on our data fetching logic or search explicitly.
-                    # Typically, PNM ID is 24th col (index 23) in admin view, but user uploads vary.
-                    # Let's search by name in col 2 (index 1) which is standard for get_pnm_list()
                     pnm_rows = sheet_pnm.get_all_values()
                     pnm_id = "Unknown"
                     
-                    # Try to find ID column index
-                    pnm_headers = pnm_rows[0]
-                    pnm_id_idx = next((i for i, h in enumerate(pnm_headers) if 'id' in h.lower()), 0) # Default to 0 if not found
-                    pnm_name_idx = next((i for i, h in enumerate(pnm_headers) if 'name' in h.lower()), 1)
+                    if pnm_rows:
+                        pnm_headers = pnm_rows[0]
+                        
+                        # Fix: Specific search for "PNM ID"
+                        try:
+                            pnm_id_idx = next(i for i, h in enumerate(pnm_headers) if h.strip().lower() == "pnm id")
+                        except StopIteration:
+                            # Fallback if specific "PNM ID" not found, try generic "ID"
+                            pnm_id_idx = next((i for i, h in enumerate(pnm_headers) if 'id' in h.lower()), 0)
 
-                    for row in pnm_rows:
-                        if len(row) > pnm_name_idx:
-                            if row[pnm_name_idx].strip() == target_pnm:
-                                pnm_id = row[pnm_id_idx]
-                                break
+                        pnm_name_idx = next((i for i, h in enumerate(pnm_headers) if 'name' in h.lower()), 1)
+
+                        for row in pnm_rows:
+                            if len(row) > max(pnm_name_idx, pnm_id_idx):
+                                if row[pnm_name_idx].strip() == target_pnm:
+                                    pnm_id = row[pnm_id_idx]
+                                    break
                     
                     # 3. SAVE DATA
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
