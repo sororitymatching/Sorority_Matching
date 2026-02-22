@@ -44,7 +44,6 @@ def get_party_options():
         sheet = get_sheet("Settings")
         if not sheet: return ["Party 1", "Party 2", "Party 3", "Party 4"]
         
-        # Safely get B1 for number of parties
         val = sheet.acell('B1').value
         if val and val.isdigit():
             num_parties = int(val)
@@ -65,11 +64,9 @@ def get_roster():
         sheet = get_sheet("Member Information")
         if not sheet: return []
         
-        # Get headers to find the correct column
         headers = sheet.row_values(1)
         name_col_index = 3 # Default to 3rd column
         
-        # Try to find specific "Name" or "Full Name" header
         for i, header in enumerate(headers):
             h_lower = header.lower().strip()
             if h_lower == "full name" or h_lower == "name" or h_lower == "member name":
@@ -78,7 +75,6 @@ def get_roster():
                 
         names = sheet.col_values(name_col_index) 
         
-        # Remove header if it exists
         if names:
             first_val = names[0].lower().strip()
             if "name" in first_val or "roster" in first_val:
@@ -91,9 +87,6 @@ def get_roster():
 
 @st.cache_data(ttl=300)
 def get_pnm_list():
-    """
-    Fetches the list of PNM names from the 'PNM Information' sheet, Column B.
-    """
     try:
         sheet = get_sheet("PNM Information")
         if not sheet: return []
@@ -109,9 +102,6 @@ def get_pnm_list():
 
 @st.cache_data(ttl=300)
 def get_pnm_dataframe():
-    """
-    Fetches all data from the 'PNM Information' sheet as a DataFrame.
-    """
     try:
         sheet = get_sheet("PNM Information")
         if not sheet: return pd.DataFrame()
@@ -119,7 +109,6 @@ def get_pnm_dataframe():
         data = sheet.get_all_values()
         if not data: return pd.DataFrame()
         
-        # Assume first row is header
         return pd.DataFrame(data[1:], columns=data[0])
     except Exception as e:
         st.error(f"Error fetching PNM dataframe: {e}")
@@ -128,7 +117,6 @@ def get_pnm_dataframe():
 # --- MAIN APP LAYOUT ---
 st.title("Sorority Recruitment Portal")
 
-# Load data dynamically
 roster = get_roster()
 pnm_list = get_pnm_list()
 party_options = get_party_options()
@@ -269,7 +257,7 @@ with tab3:
                     st.error(f"Error saving excuse: {e}")
 
 # ==========================
-# TAB 4: VIEW PNM INFORMATION (Modified)
+# TAB 4: VIEW PNM INFORMATION
 # ==========================
 with tab4:
     st.header("PNM Roster & Information")
@@ -284,7 +272,6 @@ with tab4:
     
     if not df_pnm.empty:
         # --- FILTER COLUMNS ---
-        # Exclude timestamp and ranking columns (case-insensitive check)
         cols_to_drop = [
             c for c in df_pnm.columns 
             if 'timestamp' in c.lower() or 'recruit rank' in c.lower() or 'average ranking' in c.lower()
@@ -314,18 +301,15 @@ with tab4:
         for idx, row in df_pnm.iterrows():
             p_id = row[id_col_name] if id_col_name else (idx + 1)
             p_name = row[name_col_name]
-            
             label = f"{p_id} - {p_name}"
             pnm_options.append(label)
             pnm_map[label] = idx
 
-        # Dropdown Widget
         selected_view = st.selectbox("Select a PNM to view individual details:", pnm_options)
 
         # --- 3. Display Logic ---
         if selected_view == "View All PNMs":
             search_query = st.text_input("🔍 Search All PNMs (Name, Hometown, etc.):", key="pnm_search_input")
-            
             if search_query:
                 mask = df_pnm.astype(str).apply(lambda x: x.str.contains(search_query, case=False)).any(axis=1)
                 display_df = df_pnm[mask]
@@ -335,11 +319,10 @@ with tab4:
             st.dataframe(display_df, use_container_width=True)
             
         else:
-            # --- INDIVIDUAL VIEW & RANKING ---
+            # --- INDIVIDUAL VIEW ---
             row_idx = pnm_map[selected_view]
             pnm_data = df_pnm.iloc[row_idx]
             
-            # Show formatted profile
             st.markdown(f"### 👤 Profile: {selected_view}")
             st.divider()
             
@@ -361,10 +344,10 @@ with tab4:
                     val_str = str(value).strip()
                     st.info(val_str if val_str else "N/A")
 
-            # --- RANKING SECTION ---
+            # --- RANKING SECTION (UPDATED) ---
             st.divider()
             st.subheader("⭐ Rate this PNM")
-            st.markdown("Enter your ranking for this PNM below. This will be saved to the **Rankings** sheet.")
+            st.markdown("Enter your ranking for this PNM below. This will be saved to the **PNM Rankings** sheet.")
 
             with st.form(key=f"rank_form"):
                 col_rank_1, col_rank_2 = st.columns(2)
@@ -373,7 +356,6 @@ with tab4:
                     ranker_name = st.selectbox("Your Name:", [""] + roster, key="ranker_name")
                 
                 with col_rank_2:
-                    # Adjust min_value, max_value, and step as needed for your scoring system
                     score = st.number_input("Ranking Score (e.g., 0-5):", min_value=0.0, max_value=5.0, step=0.1)
 
                 submit_rank = st.form_submit_button("Submit Ranking")
@@ -382,23 +364,47 @@ with tab4:
                 if not ranker_name:
                     st.warning("⚠️ Please select your name before submitting.")
                 else:
+                    # 1. Open Sheets
                     sheet_rank = get_sheet("PNM Rankings")
-                    if sheet_rank:
+                    sheet_mem = get_sheet("Member Information")
+                    
+                    if sheet_rank and sheet_mem:
                         try:
-                            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            # 2. Find Member ID based on Selected Name
+                            # Based on Tab 1, Member Info columns are: [ID, Timestamp, Name, ...]
+                            # ID is index 0, Name is index 2
+                            mem_rows = sheet_mem.get_all_values()
+                            ranker_id = "Unknown"
                             
-                            # Get Current PNM ID and Name for the record
+                            for row in mem_rows:
+                                if len(row) > 2:
+                                    # Compare names (roster names are stripped, so we strip here too)
+                                    if row[2].strip() == ranker_name:
+                                        ranker_id = row[0]
+                                        break
+                            
+                            # 3. Prepare Data
+                            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             curr_pnm_id = pnm_data[id_col_name] if id_col_name else (row_idx + 1)
                             curr_pnm_name = pnm_data[name_col_name]
                             
-                            # Append: [Timestamp, Member Name, PNM ID, PNM Name, Score]
-                            sheet_rank.append_row([timestamp, ranker_name, str(curr_pnm_id), curr_pnm_name, score])
+                            # 4. Save to 'Rankings' Sheet
+                            # Columns: [Timestamp, Member ID, Member Name, PNM ID, PNM Name, Score]
+                            sheet_rank.append_row([
+                                timestamp, 
+                                ranker_id, 
+                                ranker_name, 
+                                str(curr_pnm_id), 
+                                curr_pnm_name, 
+                                score
+                            ])
                             
-                            st.success(f"✅ Ranking saved for {curr_pnm_name}!")
+                            st.success(f"✅ Ranking saved for {curr_pnm_name} by {ranker_name} (Member ID: {ranker_id})!")
+                            st.balloons()
                         except Exception as e:
                             st.error(f"Error saving ranking: {e}")
                     else:
-                        st.error("❌ 'Rankings' sheet not found. Please create a sheet named 'Rankings' in your Google Sheet.")
+                        st.error("❌ Sheets not found. Please ensure 'PNM Rankings' and 'Member Information' sheets exist.")
 
     else:
         st.info("No PNM information found. Please ensure the 'PNM Information' sheet is populated.")
