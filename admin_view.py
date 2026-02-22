@@ -175,8 +175,6 @@ else:
     with tab3:
         st.header("PNM Ranking Management")
         
-        st.subheader("🏆 Average Rankings (from Member Votes)")
-        
         # 1. Fetch Rankings from 'PNM Rankings' sheet
         df_votes = get_data("PNM Rankings")
         
@@ -214,8 +212,6 @@ else:
                         
                     if updates_count > 0:
                         st.toast(f"✅ Auto-synced {updates_count} PNM rankings!", icon="🔄")
-                    
-                    st.divider()
                     st.subheader("📄 Raw Ranking Data (PNM Rankings Sheet)")
                     st.dataframe(df_votes, use_container_width=True)
                     
