@@ -401,7 +401,7 @@ with tab4:
                             
                             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             
-                            # 3. SAVE [Member ID, Member Name, PNM ID, PNM Name, Score] (plus Timestamp)
+                            # 3. SAVE [Timestamp, Member ID, Member Name, PNM ID, PNM Name, Score]
                             sheet_rank.append_row([
                                 timestamp, 
                                 ranker_id, 
