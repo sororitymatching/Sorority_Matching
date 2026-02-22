@@ -196,7 +196,6 @@ else:
                     avg_df = avg_df.sort_values(by='Calculated Average', ascending=False)
                     
                     st.info(f"Processing {len(df_votes)} total votes across {len(avg_df)} unique PNMs...")
-                    st.dataframe(avg_df, use_container_width=True)
                     
                     # 3. Automatic Sync (Write back to sheet)
                     # We use a spinner to indicate activity, though it happens on load/refresh
