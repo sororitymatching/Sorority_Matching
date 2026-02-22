@@ -230,7 +230,7 @@ with tab2:
                     st.error(f"Error saving data: {e}")
 
 # ==========================
-# TAB 3: PARTY EXCUSES
+# TAB 3: PARTY EXCUSES (Modified)
 # ==========================
 with tab3:
     st.header("Recruitment Party Excuse Form")
@@ -245,16 +245,32 @@ with tab3:
         if not name or not parties:
             st.warning("⚠️ Please fill in both your name and the parties.")
         else:
-            sheet = get_sheet("Party Excuses")
-            if sheet:
+            sheet_excuses = get_sheet("Party Excuses")
+            sheet_mem = get_sheet("Member Information")
+            
+            if sheet_excuses and sheet_mem:
                 try:
+                    # 1. FIND MEMBER ID
+                    mem_rows = sheet_mem.get_all_values()
+                    member_id = "Unknown"
+                    for row in mem_rows:
+                        if len(row) > 2:
+                            if row[2].strip() == name:
+                                member_id = row[0]
+                                break
+                    
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     parties_str = ", ".join(parties)
-                    sheet.append_row([timestamp, name, parties_str])
-                    st.success(f"✅ Excuse recorded for {name}!")
+                    
+                    # Columns: [Timestamp, Member Name, Member ID, Parties]
+                    sheet_excuses.append_row([timestamp, name, member_id, parties_str])
+                    
+                    st.success(f"✅ Excuse recorded for {name} (ID: {member_id})!")
                     st.balloons()
                 except Exception as e:
                     st.error(f"Error saving excuse: {e}")
+            else:
+                st.error("❌ Required sheets ('Party Excuses', 'Member Information') not found.")
 
 # ==========================
 # TAB 4: VIEW PNM INFORMATION
@@ -402,7 +418,7 @@ with tab4:
         st.info("No PNM information found. Please ensure the 'PNM Information' sheet is populated.")
 
 # ==========================
-# TAB 5: PRIOR PNM CONNECTIONS (Modified)
+# TAB 5: PRIOR PNM CONNECTIONS
 # ==========================
 with tab5:
     st.header("Prior PNM Connections")
@@ -442,12 +458,9 @@ with tab5:
                     
                     if pnm_rows:
                         pnm_headers = pnm_rows[0]
-                        
-                        # Fix: Specific search for "PNM ID"
                         try:
                             pnm_id_idx = next(i for i, h in enumerate(pnm_headers) if h.strip().lower() == "pnm id")
                         except StopIteration:
-                            # Fallback if specific "PNM ID" not found, try generic "ID"
                             pnm_id_idx = next((i for i, h in enumerate(pnm_headers) if 'id' in h.lower()), 0)
 
                         pnm_name_idx = next((i for i, h in enumerate(pnm_headers) if 'name' in h.lower()), 1)
@@ -460,8 +473,6 @@ with tab5:
                     
                     # 3. SAVE DATA
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    
-                    # Columns: [Timestamp, Member Name, Member ID, PNM Name, PNM ID]
                     sheet_conn.append_row([timestamp, member_name, member_id, target_pnm, pnm_id])
                     
                     st.success(f"✅ Connection recorded for {member_name} (ID: {member_id}) with {target_pnm} (ID: {pnm_id})!")
