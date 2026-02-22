@@ -42,6 +42,7 @@ def get_sheet(worksheet_name):
 def get_party_options():
     try:
         sheet = get_sheet("Settings")
+
         if not sheet: return ["Party 1", "Party 2", "Party 3", "Party 4"]
         
         # Safely get B1 for number of parties
@@ -59,19 +60,36 @@ def get_party_options():
 @st.cache_data(ttl=300)
 def get_roster():
     """
-    Fetches the roster dynamically from the 'Settings' sheet, Column D.
+    Fetches the roster dynamically from the 'Member Information' sheet.
+    Looks for a column named 'Full Name', 'Name', or defaults to Column 3 (standard format).
     """
     try:
-        sheet = get_sheet("Settings")
+        sheet = get_sheet("Member Information")
         if not sheet: return []
         
-        names = sheet.col_values(4) 
-        if names and "Roster" in names[0]: 
-            names = names[1:]
+        # Get headers to find the correct column
+        headers = sheet.row_values(1)
+        name_col_index = 3 # Default to 3rd column [ID, Timestamp, Name...]
+        
+        # Try to find specific "Name" or "Full Name" header
+        for i, header in enumerate(headers):
+            h_lower = header.lower().strip()
+            if h_lower == "full name" or h_lower == "name" or h_lower == "member name":
+                name_col_index = i + 1 # gspread uses 1-based indexing
+                break
+                
+        names = sheet.col_values(name_col_index) 
+        
+        # Remove header if it exists
+        if names:
+            first_val = names[0].lower().strip()
+            if "name" in first_val or "roster" in first_val:
+                names = names[1:]
             
         return sorted([n for n in names if n.strip()])
     except Exception as e:
-        st.error(f"Error fetching roster: {e}")
+        # Silently fail or log, return empty list to avoid crashing app
+        print(f"Error fetching roster: {e}")
         return []
 
 @st.cache_data(ttl=300)
@@ -119,7 +137,7 @@ pnm_list = get_pnm_list()
 party_options = get_party_options()
 
 if not roster:
-    st.warning("⚠️ Roster is empty. Please ensure the 'Settings' sheet has names in Column D.")
+    st.warning("⚠️ Roster is empty. Please ensure the 'Member Information' sheet is populated with names.")
 
 # Tabs
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
