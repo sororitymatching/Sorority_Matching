@@ -263,7 +263,6 @@ with tab4:
     st.header("PNM Roster & Information")
     st.markdown("Use the dropdown to view a specific PNM or search the entire list.")
     
-    # Refresh button
     if st.button("🔄 Refresh PNM List"):
         st.cache_data.clear()
         st.rerun()
@@ -344,7 +343,7 @@ with tab4:
                     val_str = str(value).strip()
                     st.info(val_str if val_str else "N/A")
 
-            # --- RANKING SECTION (UPDATED) ---
+            # --- RANKING SECTION ---
             st.divider()
             st.subheader("⭐ Rate this PNM")
             st.markdown("Enter your ranking for this PNM below. This will be saved to the **PNM Rankings** sheet.")
@@ -364,32 +363,25 @@ with tab4:
                 if not ranker_name:
                     st.warning("⚠️ Please select your name before submitting.")
                 else:
-                    # 1. Open Sheets
                     sheet_rank = get_sheet("PNM Rankings")
                     sheet_mem = get_sheet("Member Information")
                     
                     if sheet_rank and sheet_mem:
                         try:
                             # 2. Find Member ID based on Selected Name
-                            # Based on Tab 1, Member Info columns are: [ID, Timestamp, Name, ...]
-                            # ID is index 0, Name is index 2
                             mem_rows = sheet_mem.get_all_values()
                             ranker_id = "Unknown"
                             
                             for row in mem_rows:
                                 if len(row) > 2:
-                                    # Compare names (roster names are stripped, so we strip here too)
                                     if row[2].strip() == ranker_name:
                                         ranker_id = row[0]
                                         break
                             
-                            # 3. Prepare Data
                             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             curr_pnm_id = pnm_data[id_col_name] if id_col_name else (row_idx + 1)
                             curr_pnm_name = pnm_data[name_col_name]
                             
-                            # 4. Save to 'Rankings' Sheet
-                            # Columns: [Timestamp, Member ID, Member Name, PNM ID, PNM Name, Score]
                             sheet_rank.append_row([
                                 timestamp, 
                                 ranker_id, 
@@ -410,7 +402,7 @@ with tab4:
         st.info("No PNM information found. Please ensure the 'PNM Information' sheet is populated.")
 
 # ==========================
-# TAB 5: PRIOR PNM CONNECTIONS
+# TAB 5: PRIOR PNM CONNECTIONS (Modified)
 # ==========================
 with tab5:
     st.header("Prior PNM Connections")
@@ -429,12 +421,51 @@ with tab5:
         if not member_name or not target_pnm:
             st.warning("⚠️ Please fill in all fields.")
         else:
-            sheet = get_sheet("Prior Connections")
-            if sheet:
+            sheet_conn = get_sheet("Prior Connections")
+            sheet_mem = get_sheet("Member Information")
+            sheet_pnm = get_sheet("PNM Information")
+
+            if sheet_conn and sheet_mem and sheet_pnm:
                 try:
+                    # 1. FIND MEMBER ID
+                    # "Member Information": [ID, Timestamp, Name, ...]
+                    # We assume ID is col 0, Name is col 2
+                    mem_rows = sheet_mem.get_all_values()
+                    member_id = "Unknown"
+                    for row in mem_rows:
+                        if len(row) > 2:
+                            if row[2].strip() == member_name:
+                                member_id = row[0]
+                                break
+
+                    # 2. FIND PNM ID
+                    # "PNM Information": [Timestamp, ID, Name, ...] or [ID, Name, ...]
+                    # We'll rely on our data fetching logic or search explicitly.
+                    # Typically, PNM ID is 24th col (index 23) in admin view, but user uploads vary.
+                    # Let's search by name in col 2 (index 1) which is standard for get_pnm_list()
+                    pnm_rows = sheet_pnm.get_all_values()
+                    pnm_id = "Unknown"
+                    
+                    # Try to find ID column index
+                    pnm_headers = pnm_rows[0]
+                    pnm_id_idx = next((i for i, h in enumerate(pnm_headers) if 'id' in h.lower()), 0) # Default to 0 if not found
+                    pnm_name_idx = next((i for i, h in enumerate(pnm_headers) if 'name' in h.lower()), 1)
+
+                    for row in pnm_rows:
+                        if len(row) > pnm_name_idx:
+                            if row[pnm_name_idx].strip() == target_pnm:
+                                pnm_id = row[pnm_id_idx]
+                                break
+                    
+                    # 3. SAVE DATA
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    sheet.append_row([timestamp, member_name, target_pnm])
-                    st.success(f"✅ Connection recorded for {member_name}!")
+                    
+                    # Columns: [Timestamp, Member Name, Member ID, PNM Name, PNM ID]
+                    sheet_conn.append_row([timestamp, member_name, member_id, target_pnm, pnm_id])
+                    
+                    st.success(f"✅ Connection recorded for {member_name} (ID: {member_id}) with {target_pnm} (ID: {pnm_id})!")
                     st.balloons()
                 except Exception as e:
                     st.error(f"Error saving connection: {e}")
+            else:
+                st.error("❌ One or more required sheets ('Prior Connections', 'Member Information', 'PNM Information') are missing.")
