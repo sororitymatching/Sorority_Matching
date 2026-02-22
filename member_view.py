@@ -302,12 +302,14 @@ with tab4:
         )
         st.divider()
 
-        # --- 2. Dropdown Setup ---
-        name_col_idx = 1 if len(df_pnm.columns) > 1 else 0
-        name_col_name = df_pnm.columns[name_col_idx]
+        # --- 2. Dropdown Setup (Modified Logic) ---
+        # Prioritize "PNM Name" first, then fallback to "Name" or index 1
+        name_col_name = next((c for c in df_pnm.columns if c.strip().lower() == 'pnm name'), None)
+        if not name_col_name:
+             name_col_name = next((c for c in df_pnm.columns if c.strip().lower() == 'name'), df_pnm.columns[1])
         
         # Identify ID Column (prioritize "PNM ID" then "ID")
-        id_col_name = next((c for c in df_pnm.columns if c.lower() == 'pnm id'), None)
+        id_col_name = next((c for c in df_pnm.columns if c.strip().lower() == 'pnm id'), None)
         if not id_col_name:
              id_col_name = next((c for c in df_pnm.columns if 'id' in c.lower()), None)
         
@@ -360,7 +362,7 @@ with tab4:
                     val_str = str(value).strip()
                     st.info(val_str if val_str else "N/A")
 
-            # --- RANKING SECTION (UPDATED) ---
+            # --- RANKING SECTION ---
             st.divider()
             st.subheader("⭐ Rate this PNM")
             st.markdown("Enter your ranking for this PNM below. This will be saved to the **PNM Rankings** sheet.")
@@ -395,7 +397,7 @@ with tab4:
                                         ranker_id = row[0]
                                         break
                             
-                            # 2. FIND PNM ID
+                            # 2. FIND PNM ID (Using identified columns)
                             curr_pnm_id = pnm_data[id_col_name] if id_col_name else (row_idx + 1)
                             curr_pnm_name = pnm_data[name_col_name]
                             
