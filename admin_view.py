@@ -52,7 +52,6 @@ def update_team_ranking(team_id, new_ranking):
     try:
         gc = get_gc()
         sheet = gc.open(SHEET_NAME).worksheet("Bump Teams")
-        # Column E (index 5) is Team ID. Column F (index 6) is Ranking.
         cell = sheet.find(str(team_id), in_column=5)
         if cell:
             sheet.update_cell(cell.row, 6, new_ranking)
@@ -67,20 +66,17 @@ def update_pnm_ranking(pnm_id, new_ranking):
     try:
         gc = get_gc()
         sheet = gc.open(SHEET_NAME).worksheet("PNM Information")
-        
-        # PNM ID is the 24th item (Column X)
-        # Rank is the 25th item (Column Y)
+        # PNM ID is column 24 (index 23), Rank is column 25 (index 24)
         cell = sheet.find(str(pnm_id), in_column=24)
-        
         if cell:
             sheet.update_cell(cell.row, 25, new_ranking)
             return True
         else:
-            st.error(f"Could not find PNM ID {pnm_id} in 'PNM Information' sheet.")
+            # Silent fail to avoid spamming errors if ID mismatch
+            print(f"Could not find PNM ID {pnm_id}")
             return False
-            
     except Exception as e:
-        st.error(f"Error updating PNM ranking: {e}")
+        print(f"Error updating PNM ranking: {e}")
         return False
 
 # --- MAIN PAGE ---
@@ -111,17 +107,13 @@ else:
     # --- TAB 1: SETTINGS ---
     with tab1:
         st.header("Event Configuration")
-        
         with st.form("party_config"):
             count = st.number_input("Number of Parties", 1, 50, 4)
             if st.form_submit_button("Update Party Count"):
                 if update_settings('B1', count): st.toast("Updated!")
-        
         st.divider()
         st.header("Roster Management")
-        
         col_r1, col_r2 = st.columns(2)
-        
         with col_r1:
             st.subheader("Option A: Sync from Sheet")
             st.info("Pull names directly from the 'Member Information' tab.")
@@ -146,7 +138,6 @@ else:
                         st.error(f"Could not find name column. Searched: {possible_cols}")
                 else:
                     st.error("'Member Information' sheet is empty.")
-
         with col_r2:
             st.subheader("Option B: Upload CSV")
             file = st.file_uploader("Upload Member List (CSV)", type="csv")
@@ -166,7 +157,6 @@ else:
             df_members = get_data("Member Information")
         except:
             df_members = pd.DataFrame()
-            
         if not df_members.empty:
             search_mem = st.text_input("🔍 Search Members:")
             if search_mem:
@@ -181,7 +171,7 @@ else:
         else:
             st.info("No member information found.")
 
-    # --- TAB 3: PNM RANKINGS (MODIFIED) ---
+    # --- TAB 3: PNM RANKINGS (MODIFIED - AUTO SYNC) ---
     with tab3:
         st.header("PNM Ranking Management")
         
@@ -192,49 +182,44 @@ else:
         
         if not df_votes.empty:
             try:
-                # Ensure Score is numeric
                 df_votes['Score'] = pd.to_numeric(df_votes['Score'], errors='coerce')
-                
-                # Check for required columns. 
-                # Note: The prompt implies PNM Name might not be reliable or present in votes?
-                # But the sample data 'PNM Name' IS present in votes.
-                # If we want to be safe, we group by ID.
                 
                 if 'PNM ID' in df_votes.columns and 'Score' in df_votes.columns:
                     
                     # 2. Calculate Averages
-                    # Group by ID (and Name if available for display)
                     group_cols = ['PNM ID']
                     if 'PNM Name' in df_votes.columns:
                         group_cols.append('PNM Name')
                         
                     avg_df = df_votes.groupby(group_cols)['Score'].mean().reset_index()
                     avg_df.rename(columns={'Score': 'Calculated Average'}, inplace=True)
-                    
-                    # Sort by score descending
                     avg_df = avg_df.sort_values(by='Calculated Average', ascending=False)
                     
-                    st.info(f"Found {len(df_votes)} total votes for {len(avg_df)} unique PNMs.")
+                    st.info(f"Processing {len(df_votes)} total votes across {len(avg_df)} unique PNMs...")
                     st.dataframe(avg_df, use_container_width=True)
                     
-                    # 3. Sync Button
-                    if st.button("🚀 Sync Calculated Averages to 'PNM Information' Sheet"):
-                        progress_bar = st.progress(0, text="Starting update...")
-                        total_pnms = len(avg_df)
-                        success_count = 0
-                        
+                    # 3. Automatic Sync (Write back to sheet)
+                    # We use a spinner to indicate activity, though it happens on load/refresh
+                    with st.spinner("Syncing rankings to 'PNM Information' sheet..."):
+                        updates_count = 0
+                        # Iterate and update
+                        # Optimization: In a real app, batch update is better. 
+                        # Here we iterate as per existing helper pattern.
                         for idx, row in avg_df.iterrows():
-                            pnm_id = row['PNM ID']
-                            new_score = round(row['Calculated Average'], 2)
-                            
-                            if update_pnm_ranking(pnm_id, new_score):
-                                success_count += 1
-                            
-                            progress_bar.progress((idx + 1) / total_pnms, text=f"Updating PNM ID {pnm_id}...")
-                            
-                        progress_bar.empty()
-                        st.success(f"✅ Successfully updated rankings for {success_count} PNMs!")
-                        st.rerun()
+                            p_id = row['PNM ID']
+                            score = round(row['Calculated Average'], 2)
+                            # Update the sheet
+                            # Note: This is slow if list is long. 
+                            if update_pnm_ranking(p_id, score):
+                                updates_count += 1
+                        
+                    if updates_count > 0:
+                        st.toast(f"✅ Auto-synced {updates_count} PNM rankings!", icon="🔄")
+                    
+                    st.divider()
+                    st.subheader("📄 Raw Ranking Data (PNM Rankings Sheet)")
+                    st.dataframe(df_votes, use_container_width=True)
+                    
                 else:
                     st.error("Missing columns 'PNM ID' or 'Score' in 'PNM Rankings' sheet.")
                     
