@@ -230,7 +230,7 @@ with tab2:
                     st.error(f"Error saving data: {e}")
 
 # ==========================
-# TAB 3: PARTY EXCUSES (Modified)
+# TAB 3: PARTY EXCUSES
 # ==========================
 with tab3:
     st.header("Recruitment Party Excuse Form")
@@ -250,7 +250,6 @@ with tab3:
             
             if sheet_excuses and sheet_mem:
                 try:
-                    # 1. FIND MEMBER ID
                     mem_rows = sheet_mem.get_all_values()
                     member_id = "Unknown"
                     for row in mem_rows:
@@ -262,7 +261,6 @@ with tab3:
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     parties_str = ", ".join(parties)
                     
-                    # Columns: [Timestamp, Member Name, Member ID, Parties]
                     sheet_excuses.append_row([timestamp, name, member_id, parties_str])
                     
                     st.success(f"✅ Excuse recorded for {name} (ID: {member_id})!")
@@ -273,7 +271,7 @@ with tab3:
                 st.error("❌ Required sheets ('Party Excuses', 'Member Information') not found.")
 
 # ==========================
-# TAB 4: VIEW PNM INFORMATION
+# TAB 4: VIEW PNM INFORMATION (Modified)
 # ==========================
 with tab4:
     st.header("PNM Roster & Information")
@@ -308,7 +306,10 @@ with tab4:
         name_col_idx = 1 if len(df_pnm.columns) > 1 else 0
         name_col_name = df_pnm.columns[name_col_idx]
         
-        id_col_name = next((c for c in df_pnm.columns if 'id' in c.lower()), None)
+        # Identify ID Column (prioritize "PNM ID" then "ID")
+        id_col_name = next((c for c in df_pnm.columns if c.lower() == 'pnm id'), None)
+        if not id_col_name:
+             id_col_name = next((c for c in df_pnm.columns if 'id' in c.lower()), None)
         
         pnm_options = ["View All PNMs"]
         pnm_map = {} 
@@ -359,7 +360,7 @@ with tab4:
                     val_str = str(value).strip()
                     st.info(val_str if val_str else "N/A")
 
-            # --- RANKING SECTION ---
+            # --- RANKING SECTION (UPDATED) ---
             st.divider()
             st.subheader("⭐ Rate this PNM")
             st.markdown("Enter your ranking for this PNM below. This will be saved to the **PNM Rankings** sheet.")
@@ -384,7 +385,7 @@ with tab4:
                     
                     if sheet_rank and sheet_mem:
                         try:
-                            # 2. Find Member ID based on Selected Name
+                            # 1. FIND MEMBER ID
                             mem_rows = sheet_mem.get_all_values()
                             ranker_id = "Unknown"
                             
@@ -394,10 +395,13 @@ with tab4:
                                         ranker_id = row[0]
                                         break
                             
-                            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            # 2. FIND PNM ID
                             curr_pnm_id = pnm_data[id_col_name] if id_col_name else (row_idx + 1)
                             curr_pnm_name = pnm_data[name_col_name]
                             
+                            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            
+                            # 3. SAVE [Member ID, Member Name, PNM ID, PNM Name, Score] (plus Timestamp)
                             sheet_rank.append_row([
                                 timestamp, 
                                 ranker_id, 
