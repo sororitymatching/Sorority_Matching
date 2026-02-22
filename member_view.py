@@ -44,7 +44,7 @@ def find_row_by_col(sheet, col_index, value):
             if len(row) > idx_py and row[idx_py].strip() == value.strip():
                 return i + 1, row
         return None, None
-    except Exception:
+    except Exception as e:
         return None, None
 
 def find_row_composite(sheet, col_idx_1, val_1, col_idx_2, val_2):
@@ -88,10 +88,21 @@ def get_roster():
                 break
         names = sheet.col_values(name_col_index) 
         if names:
-            # Simple check to remove header if caught
             if "name" in names[0].lower() or "roster" in names[0].lower():
                 names = names[1:]
         return sorted([n for n in names if n.strip()])
+    except:
+        return []
+
+@st.cache_data(ttl=300)
+def get_pnm_list():
+    try:
+        sheet = get_sheet("PNM Information")
+        if not sheet: return []
+        pnm_names = sheet.col_values(2) 
+        if pnm_names and ("Name" in pnm_names[0] or "Enter" in pnm_names[0]):
+            pnm_names = pnm_names[1:]
+        return sorted([n for n in pnm_names if n.strip()])
     except:
         return []
 
@@ -101,8 +112,7 @@ def get_pnm_dataframe():
         sheet = get_sheet("PNM Information")
         if not sheet: return pd.DataFrame()
         data = sheet.get_all_values()
-        if not data: return pd.DataFrame()
-        return pd.DataFrame(data[1:], columns=data[0])
+        return pd.DataFrame(data[1:], columns=data[0]) if data else pd.DataFrame()
     except:
         return pd.DataFrame()
 
@@ -110,10 +120,8 @@ def get_pnm_dataframe():
 st.title("Sorority Recruitment Portal")
 
 roster = get_roster()
+pnm_list = get_pnm_list()
 party_options = get_party_options()
-
-# We load the dataframe once here to use in both Tab 4 and Tab 5
-df_pnm_global = get_pnm_dataframe()
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "My Information", 
@@ -128,7 +136,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 # ==========================
 with tab1:
     st.header("My Member Information")
-    st.markdown("Select your name to edit your information.")
+    st.markdown("Select your name to edit your information. If you've already submitted, it will load below.")
     
     member_name = st.selectbox("Your Name:", [""] + roster, key="info_name")
     
@@ -179,6 +187,7 @@ with tab1:
             if sheet:
                 try:
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    
                     if existing_row_idx:
                         row_data = [existing_id, timestamp, member_name, major, minor, year, hometown, hobbies, college_inv, hs_inv]
                         sheet.update(f"A{existing_row_idx}:J{existing_row_idx}", [row_data])
@@ -308,7 +317,7 @@ with tab3:
                     st.error(f"Error: {e}")
 
 # ==========================
-# TAB 4: VIEW PNM INFORMATION & RANKING
+# TAB 4: VIEW PNM INFORMATION & RANKING (MODIFIED)
 # ==========================
 with tab4:
     st.header("PNM Roster & Information")
@@ -316,12 +325,7 @@ with tab4:
         st.cache_data.clear()
         st.rerun()
 
-    df_pnm = df_pnm_global.copy()
-    
-    # Pre-calculate mapping for dropdowns (Used in Tab 4 and Tab 5)
-    pnm_options = []
-    pnm_map = {}
-    pnm_id_name_list = [] # For Tab 5
+    df_pnm = get_pnm_dataframe()
     
     if not df_pnm.empty:
         # Columns cleanup
@@ -333,22 +337,27 @@ with tab4:
         st.download_button("📥 Download CSV", csv, "pnm_info.csv", "text/csv")
         st.divider()
 
-        # Identify Key Columns (More Robust Logic)
-        # Try to find 'id' in headers, else default to column 0 (usually ID)
-        id_col = next((c for c in df_pnm.columns if 'id' in c.lower() and 'user' not in c.lower()), df_pnm.columns[0])
-        # Try to find 'name' in headers, else default to column 1
-        name_col = next((c for c in df_pnm.columns if 'name' in c.lower() or 'pnm' in c.lower()), df_pnm.columns[1] if len(df_pnm.columns) > 1 else df_pnm.columns[0])
+        # Identify Key Columns
+        # 1. SPECIFICALLY LOOK FOR "PNM ID" as requested
+        id_col = next((c for c in df_pnm.columns if c.strip().lower() == 'pnm id'), None)
+        # Fallback: if not found exactly, look for any column with "id"
+        if not id_col:
+            id_col = next((c for c in df_pnm.columns if 'id' in c.lower()), df_pnm.columns[0])
+            
+        # 2. Look for Name Column
+        name_col = next((c for c in df_pnm.columns if 'name' in c.lower()), df_pnm.columns[1])
         
+        # Build Options with ID and Name
         pnm_options = ["View All PNMs"]
+        pnm_map = {}
         for idx, row in df_pnm.iterrows():
-            # Create Label: "ID - Name"
-            pnm_id = str(row[id_col]).strip()
-            pnm_name = str(row[name_col]).strip()
-            label = f"{pnm_id} - {pnm_name}"
+            # Create a label like "123 - Jane Doe"
+            p_id = str(row[id_col])
+            p_name = str(row[name_col])
+            label = f"{p_id} - {p_name}"
             
             pnm_options.append(label)
             pnm_map[label] = idx
-            pnm_id_name_list.append(label)
 
         selected_view = st.selectbox("Select PNM:", pnm_options)
 
@@ -382,14 +391,17 @@ with tab4:
             st.divider()
             st.subheader("⭐ Rate this PNM")
             
+            # 1. Select Ranker (Outside form to trigger update)
             ranker_name = st.selectbox("Your Name (Ranker):", [""] + roster, key="ranker_name")
             
             rank_default = 0.0
             existing_rank_row = None
             
+            # 2. Check for existing ranking
             if ranker_name:
                 sheet_rank = get_sheet("PNM Rankings")
                 if sheet_rank:
+                    # Search: Ranker Name (Col 3) AND PNM ID (Col 4)
                     r_idx, r_vals = find_row_composite(sheet_rank, 3, ranker_name, 4, curr_pnm_id)
                     if r_idx:
                         existing_rank_row = r_idx
@@ -412,6 +424,7 @@ with tab4:
                     
                     if sheet_rank and sheet_mem:
                         try:
+                            # Get Member ID
                             m_idx, m_vals = find_row_by_col(sheet_mem, 3, ranker_name)
                             ranker_id = m_vals[0] if m_vals else "Unknown"
                             
@@ -428,62 +441,63 @@ with tab4:
                             st.error(f"Error: {e}")
 
 # ==========================
-# TAB 5: PRIOR PNM CONNECTIONS (UPDATED)
+# TAB 5: PRIOR PNM CONNECTIONS
 # ==========================
 with tab5:
     st.header("Prior PNM Connections")
-    st.markdown("Select a PNM from the list (Sorted by ID - Name)")
     
+    # 1. Select Member & PNM (Outside form)
     col1, col2 = st.columns(2)
     with col1:
         conn_member = st.selectbox("Your Name:", [""] + roster, key="conn_mem")
     with col2:
-        # Now uses the combined "ID - Name" list from the DataFrame
-        conn_pnm_selection = st.selectbox("PNM (ID - Name):", [""] + pnm_id_name_list, key="conn_pnm")
+        conn_pnm = st.selectbox("PNM Name:", [""] + pnm_list, key="conn_pnm")
 
     existing_conn_row = None
     
-    # Parse the selection to get simple Name for searching
-    clean_pnm_name = ""
-    clean_pnm_id = ""
-    
-    if conn_pnm_selection:
-        # Format is "ID - Name", we split by " - " (first occurrence only)
-        parts = conn_pnm_selection.split(" - ", 1)
-        if len(parts) == 2:
-            clean_pnm_id = parts[0]
-            clean_pnm_name = parts[1]
-        else:
-            clean_pnm_name = conn_pnm_selection # Fallback
-
-    if conn_member and clean_pnm_name:
+    # 2. Check Existence
+    if conn_member and conn_pnm:
         sheet_conn = get_sheet("Prior Connections")
         if sheet_conn:
-            # We search by Name (Col 4) to check existence
-            c_idx, c_vals = find_row_composite(sheet_conn, 2, conn_member, 4, clean_pnm_name)
+            # Search: Member (Col 2) AND PNM (Col 4)
+            c_idx, c_vals = find_row_composite(sheet_conn, 2, conn_member, 4, conn_pnm)
             if c_idx:
                 existing_conn_row = c_idx
-                st.info(f"ℹ️ You already have a connection logged with {clean_pnm_name}. Submitting again will update it.")
+                st.info(f"ℹ️ You already have a connection logged with {conn_pnm}. Submitting again will update the timestamp.")
 
     with st.form(key='connection_form'):
         submit_connection = st.form_submit_button(label='Submit/Update Connection')
 
     if submit_connection:
-        if not conn_member or not conn_pnm_selection:
+        if not conn_member or not conn_pnm:
             st.warning("⚠️ Please select both names.")
         else:
             sheet_conn = get_sheet("Prior Connections")
             sheet_mem = get_sheet("Member Information")
-            # We don't need sheet_pnm lookup anymore because we have ID from the dropdown!
+            sheet_pnm = get_sheet("PNM Information")
 
-            if sheet_conn and sheet_mem:
+            if sheet_conn and sheet_mem and sheet_pnm:
                 try:
-                    # Member ID
+                    # IDs
                     m_idx, m_vals = find_row_by_col(sheet_mem, 3, conn_member)
                     m_id = m_vals[0] if m_vals else "?"
                     
+                    # For PNM ID, we need to search PNM sheet
+                    pnm_vals = sheet_pnm.get_all_values()
+                    p_id = "?"
+                    if pnm_vals:
+                        headers = [h.lower() for h in pnm_vals[0]]
+                        name_idx = next((i for i,h in enumerate(headers) if 'name' in h), 1)
+                        # Look for 'id' generally or specifically 'pnm id'
+                        id_idx = next((i for i,h in enumerate(headers) if 'id' in h), 0)
+                        
+                        for row in pnm_vals[1:]:
+                            if len(row) > name_idx and row[name_idx].strip() == conn_pnm:
+                                if len(row) > id_idx: p_id = row[id_idx]
+                                break
+
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    row_data = [timestamp, conn_member, m_id, clean_pnm_name, clean_pnm_id]
+                    row_data = [timestamp, conn_member, m_id, conn_pnm, p_id]
                     
                     if existing_conn_row:
                         sheet_conn.update(f"A{existing_conn_row}:E{existing_conn_row}", [row_data])
