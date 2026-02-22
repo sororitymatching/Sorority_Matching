@@ -42,7 +42,6 @@ def get_sheet(worksheet_name):
 def get_party_options():
     try:
         sheet = get_sheet("Settings")
-
         if not sheet: return ["Party 1", "Party 2", "Party 3", "Party 4"]
         
         # Safely get B1 for number of parties
@@ -61,7 +60,6 @@ def get_party_options():
 def get_roster():
     """
     Fetches the roster dynamically from the 'Member Information' sheet.
-    Looks for a column named 'Full Name', 'Name', or defaults to Column 3 (standard format).
     """
     try:
         sheet = get_sheet("Member Information")
@@ -69,13 +67,13 @@ def get_roster():
         
         # Get headers to find the correct column
         headers = sheet.row_values(1)
-        name_col_index = 3 # Default to 3rd column [ID, Timestamp, Name...]
+        name_col_index = 3 # Default to 3rd column
         
         # Try to find specific "Name" or "Full Name" header
         for i, header in enumerate(headers):
             h_lower = header.lower().strip()
             if h_lower == "full name" or h_lower == "name" or h_lower == "member name":
-                name_col_index = i + 1 # gspread uses 1-based indexing
+                name_col_index = i + 1 
                 break
                 
         names = sheet.col_values(name_col_index) 
@@ -88,7 +86,6 @@ def get_roster():
             
         return sorted([n for n in names if n.strip()])
     except Exception as e:
-        # Silently fail or log, return empty list to avoid crashing app
         print(f"Error fetching roster: {e}")
         return []
 
@@ -306,19 +303,15 @@ with tab4:
         st.divider()
 
         # --- 2. Dropdown Setup ---
-        # Identify Name Column (Default to 2nd column if available, else 1st)
         name_col_idx = 1 if len(df_pnm.columns) > 1 else 0
         name_col_name = df_pnm.columns[name_col_idx]
         
-        # Identify ID Column (Look for 'ID' or 'id', else use index)
         id_col_name = next((c for c in df_pnm.columns if 'id' in c.lower()), None)
         
-        # Create Options List: "ID - Name"
         pnm_options = ["View All PNMs"]
-        pnm_map = {} # Map string back to dataframe index
+        pnm_map = {} 
         
         for idx, row in df_pnm.iterrows():
-            # Use row Index+1 if no specific ID column found
             p_id = row[id_col_name] if id_col_name else (idx + 1)
             p_name = row[name_col_name]
             
@@ -331,11 +324,9 @@ with tab4:
 
         # --- 3. Display Logic ---
         if selected_view == "View All PNMs":
-            # Show Search Bar & Full Table
             search_query = st.text_input("🔍 Search All PNMs (Name, Hometown, etc.):", key="pnm_search_input")
             
             if search_query:
-                # Case-insensitive search
                 mask = df_pnm.astype(str).apply(lambda x: x.str.contains(search_query, case=False)).any(axis=1)
                 display_df = df_pnm[mask]
             else:
@@ -344,20 +335,16 @@ with tab4:
             st.dataframe(display_df, use_container_width=True)
             
         else:
-            # Show Individual PNM with Better Formatting
+            # --- INDIVIDUAL VIEW & RANKING ---
             row_idx = pnm_map[selected_view]
             pnm_data = df_pnm.iloc[row_idx]
             
+            # Show formatted profile
             st.markdown(f"### 👤 Profile: {selected_view}")
             st.divider()
             
-            # --- Better Formatting: Key-Value Grid ---
             col1, col2 = st.columns(2)
-            
-            # Get all fields (columns)
             fields = list(pnm_data.items())
-            
-            # Split fields roughly in half
             mid_point = (len(fields) + 1) // 2
             left_fields = fields[:mid_point]
             right_fields = fields[mid_point:]
@@ -373,7 +360,46 @@ with tab4:
                     st.markdown(f"**{label}**")
                     val_str = str(value).strip()
                     st.info(val_str if val_str else "N/A")
-            
+
+            # --- RANKING SECTION ---
+            st.divider()
+            st.subheader("⭐ Rate this PNM")
+            st.markdown("Enter your ranking for this PNM below. This will be saved to the **Rankings** sheet.")
+
+            with st.form(key=f"rank_form"):
+                col_rank_1, col_rank_2 = st.columns(2)
+                
+                with col_rank_1:
+                    ranker_name = st.selectbox("Your Name:", [""] + roster, key="ranker_name")
+                
+                with col_rank_2:
+                    # Adjust min_value, max_value, and step as needed for your scoring system
+                    score = st.number_input("Ranking Score (e.g., 0-5):", min_value=0.0, max_value=5.0, step=0.1)
+
+                submit_rank = st.form_submit_button("Submit Ranking")
+
+            if submit_rank:
+                if not ranker_name:
+                    st.warning("⚠️ Please select your name before submitting.")
+                else:
+                    sheet_rank = get_sheet("PNM Rankings")
+                    if sheet_rank:
+                        try:
+                            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            
+                            # Get Current PNM ID and Name for the record
+                            curr_pnm_id = pnm_data[id_col_name] if id_col_name else (row_idx + 1)
+                            curr_pnm_name = pnm_data[name_col_name]
+                            
+                            # Append: [Timestamp, Member Name, PNM ID, PNM Name, Score]
+                            sheet_rank.append_row([timestamp, ranker_name, str(curr_pnm_id), curr_pnm_name, score])
+                            
+                            st.success(f"✅ Ranking saved for {curr_pnm_name}!")
+                        except Exception as e:
+                            st.error(f"Error saving ranking: {e}")
+                    else:
+                        st.error("❌ 'Rankings' sheet not found. Please create a sheet named 'Rankings' in your Google Sheet.")
+
     else:
         st.info("No PNM information found. Please ensure the 'PNM Information' sheet is populated.")
 
