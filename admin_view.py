@@ -70,7 +70,6 @@ def update_pnm_ranking(pnm_id, new_ranking):
         
         # PNM ID is the 24th item (Column X)
         # Rank is the 25th item (Column Y)
-        # Note: If your sheet structure changes, these indices might need adjustment.
         cell = sheet.find(str(pnm_id), in_column=24)
         
         if cell:
@@ -196,12 +195,15 @@ else:
                 # Ensure Score is numeric
                 df_votes['Score'] = pd.to_numeric(df_votes['Score'], errors='coerce')
                 
-                # Check for required columns
+                # Check for required columns. 
+                # Note: The prompt implies PNM Name might not be reliable or present in votes?
+                # But the sample data 'PNM Name' IS present in votes.
+                # If we want to be safe, we group by ID.
+                
                 if 'PNM ID' in df_votes.columns and 'Score' in df_votes.columns:
                     
                     # 2. Calculate Averages
-                    # Group by ID (and Name for display purposes)
-                    # We use 'first' for Name just to grab the label
+                    # Group by ID (and Name if available for display)
                     group_cols = ['PNM ID']
                     if 'PNM Name' in df_votes.columns:
                         group_cols.append('PNM Name')
@@ -223,14 +225,11 @@ else:
                         
                         for idx, row in avg_df.iterrows():
                             pnm_id = row['PNM ID']
-                            # Round to 2 decimal places
                             new_score = round(row['Calculated Average'], 2)
                             
-                            # Call existing helper to update the main sheet
                             if update_pnm_ranking(pnm_id, new_score):
                                 success_count += 1
                             
-                            # Update progress
                             progress_bar.progress((idx + 1) / total_pnms, text=f"Updating PNM ID {pnm_id}...")
                             
                         progress_bar.empty()
@@ -238,7 +237,6 @@ else:
                         st.rerun()
                 else:
                     st.error("Missing columns 'PNM ID' or 'Score' in 'PNM Rankings' sheet.")
-                    st.write("Columns found:", df_votes.columns.tolist())
                     
             except Exception as e:
                 st.error(f"Error processing rankings: {e}")
@@ -260,7 +258,6 @@ else:
                 display_pnm_df = df_pnms
 
             st.dataframe(display_pnm_df, use_container_width=True)
-            
             csv_pnms = display_pnm_df.to_csv(index=False).encode('utf-8')
             st.download_button("Download PNM Data CSV", csv_pnms, "pnm_data.csv", "text/csv")
         else:
