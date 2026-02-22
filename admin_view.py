@@ -32,6 +32,7 @@ def get_data(worksheet_name):
 def update_settings(cell, value):
     try:
         gc = get_gc()
+        # Ensure your sheet is named 'Settings' or change to 'Config' if needed
         gc.open(SHEET_NAME).worksheet("Settings").update_acell(cell, value)
         return True
     except: return False
@@ -39,6 +40,7 @@ def update_settings(cell, value):
 def update_roster(names_list):
     try:
         gc = get_gc()
+        # Updates the Roster in the 'Settings' tab, Column D
         ws = gc.open(SHEET_NAME).worksheet("Settings")
         ws.batch_clear(["D2:D1000"])
         names_list.sort()
@@ -98,7 +100,7 @@ if not st.session_state.authenticated:
 else:
     st.success("Logged in as Admin")
 
-    # TABS - Added "Member Information" as the second tab
+    # TABS
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "Settings & Roster", 
         "Member Information",
@@ -108,7 +110,7 @@ else:
         "View Prior Connections"
     ])
 
-    # --- TAB 1: SETTINGS ---
+    # --- TAB 1: SETTINGS & ROSTER ---
     with tab1:
         st.header("Event Configuration")
         
@@ -120,17 +122,58 @@ else:
         st.divider()
         st.header("Roster Management")
         
-        file = st.file_uploader("Upload Member List (CSV)", type="csv")
-        if file:
-            try:
-                new_names = pd.read_csv(file, header=None)[0].astype(str).tolist()
-                st.write(f"Preview: {new_names[:3]}...")
-                if st.button("Replace Roster"):
-                    if update_roster(new_names): st.toast("Roster Updated Successfully!")
-            except Exception as e:
-                st.error(f"Error reading CSV: {e}")
+        col_r1, col_r2 = st.columns(2)
+        
+        # --- Option A: Sync from Member Information Sheet ---
+        with col_r1:
+            st.subheader("Option A: Sync from Sheet")
+            st.info("Pull names directly from the 'Member Information' tab.")
+            
+            if st.button("🔄 Sync Roster from 'Member Information'"):
+                df_source = get_data("Member Information")
+                
+                if not df_source.empty:
+                    # Attempt to find the "Full Name" or "Name" column
+                    possible_cols = ["Full Name", "Name", "Member Name", "Member"]
+                    found_col = None
+                    
+                    for col in possible_cols:
+                        # Case-insensitive match
+                        match = next((c for c in df_source.columns if c.lower() == col.lower()), None)
+                        if match:
+                            found_col = match
+                            break
+                    
+                    if found_col:
+                        # Extract unique names
+                        names = df_source[found_col].astype(str).unique().tolist()
+                        names = [n for n in names if n.strip()] # Remove empty/whitespace
+                        
+                        if update_roster(names):
+                            st.success(f"✅ Successfully synced {len(names)} members from column '{found_col}'!")
+                        else:
+                            st.error("Failed to update the Settings sheet.")
+                    else:
+                        st.error(f"Could not find a name column in 'Member Information'. Searched for: {', '.join(possible_cols)}")
+                else:
+                    st.error("The 'Member Information' sheet appears to be empty or missing.")
 
-    # --- TAB 2: MEMBER INFORMATION (NEW) ---
+        # --- Option B: Upload CSV ---
+        with col_r2:
+            st.subheader("Option B: Upload CSV")
+            st.info("Upload a CSV file containing a list of names.")
+            
+            file = st.file_uploader("Upload Member List (CSV)", type="csv")
+            if file:
+                try:
+                    new_names = pd.read_csv(file, header=None)[0].astype(str).tolist()
+                    st.write(f"Preview: {new_names[:3]}...")
+                    if st.button("Replace Roster with CSV"):
+                        if update_roster(new_names): st.toast("Roster Updated Successfully!")
+                except Exception as e:
+                    st.error(f"Error reading CSV: {e}")
+
+    # --- TAB 2: MEMBER INFORMATION ---
     with tab2:
         st.header("Member Information Database")
         
