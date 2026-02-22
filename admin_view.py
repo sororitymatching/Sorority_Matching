@@ -43,6 +43,15 @@ def get_data(worksheet_name):
              st.warning("Could not find 'PNM Information' tab.")
         return pd.DataFrame()
 
+def get_setting_value(cell):
+    """Gets a single cell value from the Settings sheet."""
+    try:
+        gc = get_gc()
+        sheet = gc.open(SHEET_NAME).worksheet("Settings")
+        return sheet.acell(cell).value
+    except:
+        return None
+
 def update_settings(cell, value):
     try:
         gc = get_gc()
@@ -125,8 +134,12 @@ else:
     # --- TAB 1: SETTINGS ---
     with tab1:
         st.header("Event Configuration")
+        # Fetch current setting to display as default
+        current_parties = get_setting_value('B1')
+        default_val = int(current_parties) if current_parties and str(current_parties).isdigit() else 4
+        
         with st.form("party_config"):
-            count = st.number_input("Number of Parties", 1, 50, 4)
+            count = st.number_input("Number of Parties", 1, 50, default_val)
             if st.form_submit_button("Update Party Count"):
                 if update_settings('B1', count): st.toast("Updated!")
         st.divider()
@@ -313,17 +326,20 @@ else:
     # --- TAB 7: RUN MATCHING ---
     with tab7:
         st.subheader("Matching Configuration")
-        c1, c2, c3 = st.columns(3)
+        c1, c2 = st.columns(2)
         with c1:
-            num_of_parties = st.number_input("Total Number of Parties", min_value=1, value=4, step=1, key="match_parties")
-        with c2:
             num_pnm_matches_needed = st.number_input("PNM Matches per Bump Team (Capacity)", min_value=1, value=5, step=1, key="match_cap")
-        with c3:
+        with c2:
             num_rounds_party = st.number_input("Rounds per Party", min_value=1, value=4, step=1, key="match_rounds")
         bump_order_set = st.radio("Is the bump order set?", ["yes", "no"], index=1, key="match_order")
 
         if st.button("Run Matching Algorithm"):
             with st.spinner("Fetching data and initializing models..."):
+                # LOAD SETTINGS (Parties)
+                parties_val = get_setting_value('B1')
+                num_of_parties = int(parties_val) if parties_val and str(parties_val).isdigit() else 4
+                st.info(f"Using {num_of_parties} parties (configured in Settings).")
+                
                 # LOAD DATA
                 bump_teams = get_data("Bump Teams")
                 party_excuses = get_data("Party Excuses")
