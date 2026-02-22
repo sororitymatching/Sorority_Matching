@@ -31,20 +31,25 @@ def get_gc():
     return gspread.service_account_from_dict(creds_dict, scopes=SCOPES)
 
 def get_data(worksheet_name):
-    """Gets all data from a specific worksheet."""
+    """Gets all data and standardizes headers slightly."""
     try:
         gc = get_gc()
         sheet = gc.open(SHEET_NAME).worksheet(worksheet_name)
         data = sheet.get_all_values()
         if not data: return pd.DataFrame()
-        return pd.DataFrame(data[1:], columns=data[0])
+        
+        # Create DF
+        df = pd.DataFrame(data[1:], columns=data[0])
+        
+        # Basic cleanup: Strip whitespace from column headers
+        df.columns = df.columns.str.strip()
+        return df
     except Exception as e:
         if worksheet_name == "PNM Information":
              st.warning("Could not find 'PNM Information' tab.")
         return pd.DataFrame()
 
 def get_setting_value(cell):
-    """Gets a single cell value from the Settings sheet."""
     try:
         gc = get_gc()
         sheet = gc.open(SHEET_NAME).worksheet("Settings")
@@ -87,7 +92,8 @@ def update_pnm_ranking(pnm_id, new_ranking):
     try:
         gc = get_gc()
         sheet = gc.open(SHEET_NAME).worksheet("PNM Information")
-        cell = sheet.find(str(pnm_id), in_column=24)
+        # Assuming ID is in column 24 (X) based on previous code structure
+        cell = sheet.find(str(pnm_id), in_column=24) 
         if cell:
             sheet.update_cell(cell.row, 25, new_ranking)
             return True
@@ -104,6 +110,82 @@ def auto_adjust_columns(writer, sheet_name, df):
             len(str(col))
         ) + 2
         worksheet.set_column(idx, idx, max_len)
+
+# --- SMART COLUMN MAPPING HELPER ---
+def standardize_columns(df, entity_type='pnm'):
+    """
+    Renames columns from various inputs (Form Questions OR Simple Paste Headers)
+    to the standard names required by the algorithm.
+    """
+    df.columns = df.columns.str.strip()
+    
+    # Dictionary of {Canonical_Name: [List of possible header substrings]}
+    # The code checks if the column header CONTAINS these strings (case-insensitive)
+    mappings = {
+        'Full Name': ['name', 'member name', 'pnm name', 'student name'],
+        'Major': ['major', 'program of study'],
+        'Minor': ['minor'],
+        'Hometown': ['hometown', 'city', 'state'],
+        'Year': ['year', 'grade', 'class', 'academic year'],
+        'Hobbies': ['hobbies', 'interests', 'fun facts'],
+        'College Involvement': ['college involvement', 'campus activities', 'organizations'],
+        'High School Involvement': ['high school', 'hs involvement'],
+        'ID': ['id', 'pnm id', 'member id', 'sorority id']
+    }
+    
+    new_cols = {}
+    used_cols = set()
+
+    # 1. Try to find matches
+    for canonical, possibilities in mappings.items():
+        # strict preference for exact matches first
+        found = False
+        for col in df.columns:
+            if col in used_cols: continue
+            if col.lower() == canonical.lower():
+                new_cols[col] = canonical
+                used_cols.add(col)
+                found = True
+                break
+        
+        # fuzzy match if exact not found
+        if not found:
+            for col in df.columns:
+                if col in used_cols: continue
+                # Check if any keyword is in the column name
+                if any(p in col.lower() for p in possibilities):
+                    new_cols[col] = canonical
+                    used_cols.add(col)
+                    break
+    
+    # 2. Rename
+    df = df.rename(columns=new_cols)
+    
+    # 3. Generate IDs if missing (Crucial for pasted data)
+    id_col = 'PNM ID' if entity_type == 'pnm' else 'Sorority ID'
+    
+    # If we mapped something to 'ID', rename it to specific ID
+    if 'ID' in df.columns:
+        df.rename(columns={'ID': id_col}, inplace=True)
+    
+    # If ID column doesn't exist or has blanks, generate them
+    if id_col not in df.columns:
+        df[id_col] = range(1, len(df) + 1)
+    else:
+        # Fill empty/NaN IDs with generated ones
+        df[id_col] = df[id_col].replace('', np.nan)
+        if df[id_col].isnull().any():
+            # Find max existing ID to continue sequence
+            try:
+                max_id = pd.to_numeric(df[id_col], errors='coerce').max()
+                if pd.isna(max_id): max_id = 0
+            except:
+                max_id = 0
+            
+            fill_values = range(int(max_id) + 1, int(max_id) + 1 + df[id_col].isnull().sum())
+            df.loc[df[id_col].isnull(), id_col] = fill_values
+
+    return df
 
 # --- MAIN PAGE ---
 st.set_page_config(page_title="Admin Dashboard", layout="wide")
@@ -134,7 +216,6 @@ else:
     # --- TAB 1: SETTINGS ---
     with tab1:
         st.header("Event Configuration")
-        # Fetch current setting to display as default
         current_parties = get_setting_value('B1')
         default_val = int(current_parties) if current_parties and str(current_parties).isdigit() else 4
         
@@ -151,13 +232,14 @@ else:
             if st.button("🔄 Sync Roster from 'Member Information'"):
                 df_source = get_data("Member Information")
                 if not df_source.empty:
+                    # Smart finding of name column
                     possible_cols = ["Full Name", "Name", "Member Name", "Member"]
                     found_col = None
-                    for col in possible_cols:
-                        match = next((c for c in df_source.columns if c.lower() == col.lower()), None)
-                        if match:
-                            found_col = match
+                    for col in df_source.columns:
+                        if any(c.lower() in col.lower() for c in possible_cols):
+                            found_col = col
                             break
+                    
                     if found_col:
                         names = df_source[found_col].astype(str).unique().tolist()
                         names = [n for n in names if n.strip()] 
@@ -166,7 +248,7 @@ else:
                         else:
                             st.error("Failed to update Settings.")
                     else:
-                        st.error(f"Could not find name column. Searched: {possible_cols}")
+                        st.error(f"Could not find name column. Found columns: {df_source.columns.tolist()}")
                 else:
                     st.error("'Member Information' sheet is empty.")
         with col_r2:
@@ -209,29 +291,36 @@ else:
         if not df_votes.empty:
             try:
                 df_votes['Score'] = pd.to_numeric(df_votes['Score'], errors='coerce')
-                if 'PNM ID' in df_votes.columns and 'Score' in df_votes.columns:
-                    group_cols = ['PNM ID']
-                    if 'PNM Name' in df_votes.columns: group_cols.append('PNM Name')
+                
+                # Dynamic column finding for ID
+                id_col = next((c for c in df_votes.columns if 'pnm id' in c.lower()), None)
+                if not id_col: id_col = next((c for c in df_votes.columns if 'id' in c.lower()), None)
+
+                if id_col and 'Score' in df_votes.columns:
+                    group_cols = [id_col]
+                    name_col = next((c for c in df_votes.columns if 'pnm name' in c.lower()), None)
+                    if name_col: group_cols.append(name_col)
+                    
                     avg_df = df_votes.groupby(group_cols)['Score'].mean().reset_index()
                     avg_df.rename(columns={'Score': 'Calculated Average'}, inplace=True)
                     avg_df = avg_df.sort_values(by='Calculated Average', ascending=False)
                     
                     st.info(f"Processing {len(df_votes)} total votes across {len(avg_df)} unique PNMs...")
                     
-                    with st.spinner("Syncing rankings to 'PNM Information' sheet..."):
-                        updates_count = 0
-                        for idx, row in avg_df.iterrows():
-                            p_id = row['PNM ID']
-                            score = round(row['Calculated Average'], 2)
-                            if update_pnm_ranking(p_id, score):
-                                updates_count += 1
-                        
-                    if updates_count > 0:
-                        st.toast(f"✅ Auto-synced {updates_count} PNM rankings!", icon="🔄")
+                    if st.button("Sync Rankings to PNM Sheet"):
+                        with st.spinner("Syncing..."):
+                            updates_count = 0
+                            for idx, row in avg_df.iterrows():
+                                p_id = row[id_col]
+                                score = round(row['Calculated Average'], 2)
+                                if update_pnm_ranking(p_id, score):
+                                    updates_count += 1
+                        st.success(f"✅ Auto-synced {updates_count} PNM rankings!")
+                    
                     st.subheader("📄 Raw Ranking Data (PNM Rankings Sheet)")
                     st.dataframe(df_votes, use_container_width=True)
                 else:
-                    st.error("Missing columns 'PNM ID' or 'Score' in 'PNM Rankings' sheet.")
+                    st.error("Missing 'PNM ID' or 'Score' columns.")
             except Exception as e:
                 st.error(f"Error processing rankings: {e}")
         else:
@@ -248,8 +337,6 @@ else:
             else:
                 display_pnm_df = df_pnms
             st.dataframe(display_pnm_df, use_container_width=True)
-            csv_pnms = display_pnm_df.to_csv(index=False).encode('utf-8')
-            st.download_button("Download PNM Data CSV", csv_pnms, "pnm_data.csv", "text/csv")
         else:
             st.info("No PNM data found.")
 
@@ -258,49 +345,46 @@ else:
         st.header("Bump Team Management")
         df_teams = get_data("Bump Teams")
         if not df_teams.empty:
-            with st.expander("⭐ Assign/Update Team Rankings", expanded=True):
-                df_teams['display_label'] = df_teams.apply(
-                    lambda x: f"Team {x['Team ID']} | {x['Creator Name']}, {x['Bump Partners']}", 
-                    axis=1
-                )
-                col_a, col_b, col_c = st.columns([3, 1, 1])
-                with col_a:
-                    selected_label = st.selectbox("Select Team to Rank:", df_teams['display_label'].tolist())
-                    selected_team_id = df_teams[df_teams['display_label'] == selected_label]['Team ID'].values[0]
-                with col_b:
-                    current_rank = df_teams[df_teams['Team ID'] == selected_team_id]['Ranking'].values[0]
-                    initial_val = int(current_rank) if str(current_rank).isdigit() else 1
-                    new_rank = st.number_input(f"Assign Rank:", min_value=1, value=initial_val, key="team_rank_input")
-                with col_c:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    if st.button("Save Team Rank"):
-                        if update_team_ranking(selected_team_id, new_rank):
-                            st.success(f"Rank {new_rank} assigned!")
-                            st.rerun() 
+            # Fix column names if needed
+            id_col = next((c for c in df_teams.columns if 'team id' in c.lower() or 'id' in c.lower()), df_teams.columns[4] if len(df_teams.columns)>4 else None)
+            creator_col = next((c for c in df_teams.columns if 'creator' in c.lower()), df_teams.columns[1] if len(df_teams.columns)>1 else None)
+            partners_col = next((c for c in df_teams.columns if 'partner' in c.lower()), df_teams.columns[2] if len(df_teams.columns)>2 else None)
+            
+            if id_col and creator_col:
+                with st.expander("⭐ Assign/Update Team Rankings", expanded=True):
+                    df_teams['display_label'] = df_teams.apply(
+                        lambda x: f"Team {x[id_col]} | {x[creator_col]}, {x.get(partners_col, '')}", 
+                        axis=1
+                    )
+                    col_a, col_b, col_c = st.columns([3, 1, 1])
+                    with col_a:
+                        selected_label = st.selectbox("Select Team to Rank:", df_teams['display_label'].tolist())
+                        selected_team_id = df_teams[df_teams['display_label'] == selected_label][id_col].values[0]
+                    with col_b:
+                        rank_col = next((c for c in df_teams.columns if 'rank' in c.lower()), None)
+                        if rank_col:
+                            current_rank = df_teams[df_teams[id_col] == selected_team_id][rank_col].values[0]
+                        else:
+                            current_rank = 1
+                        initial_val = int(current_rank) if str(current_rank).isdigit() else 1
+                        new_rank = st.number_input(f"Assign Rank:", min_value=1, value=initial_val, key="team_rank_input")
+                    with col_c:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        if st.button("Save Team Rank"):
+                            if update_team_ranking(selected_team_id, new_rank):
+                                st.success(f"Rank {new_rank} assigned!")
+                                st.rerun() 
             st.divider()
-            search = st.text_input("🔍 Search Teams:")
-            display_df = df_teams.drop(columns=['display_label'])
-            if search:
-                mask = display_df.apply(lambda x: x.astype(str).str.contains(search, case=False).any(), axis=1)
-                display_df = display_df[mask]
-            st.metric("Total Teams", len(display_df))
-            st.dataframe(display_df, use_container_width=True)
-            csv_teams = display_df.to_csv(index=False).encode('utf-8')
-            st.download_button("Download CSV", csv_teams, "bump_teams.csv", "text/csv")
+            st.dataframe(df_teams.drop(columns=['display_label'], errors='ignore'), use_container_width=True)
         else:
             st.info("No bump teams found yet.")
 
     # --- TAB 5: VIEW EXCUSES ---
     with tab5:
         if st.button("🔄 Refresh Excuses"): st.rerun()
-        try:
-            df_excuses = get_data("Party Excuses")
-        except:
-            df_excuses = pd.DataFrame()
+        df_excuses = get_data("Party Excuses")
         if not df_excuses.empty:
             st.dataframe(df_excuses, use_container_width=True)
-            csv = df_excuses.to_csv(index=False).encode('utf-8')
-            st.download_button("Download CSV", csv, "excuses.csv", "text/csv")
         else:
             st.info("No excuses found.")
 
@@ -308,18 +392,9 @@ else:
     with tab6:
         st.header("Prior PNM Connections Log")
         if st.button("🔄 Refresh Connections"): st.rerun()
-        try:
-            df_connections = get_data("Prior Connections")
-        except:
-            df_connections = pd.DataFrame()
+        df_connections = get_data("Prior Connections")
         if not df_connections.empty:
-            search_conn = st.text_input("🔍 Search Connections:")
-            if search_conn:
-                mask = df_connections.apply(lambda x: x.astype(str).str.contains(search_conn, case=False).any(), axis=1)
-                df_connections = df_connections[mask]
             st.dataframe(df_connections, use_container_width=True)
-            csv_conn = df_connections.to_csv(index=False).encode('utf-8')
-            st.download_button("Download CSV", csv_conn, "prior_connections.csv", "text/csv")
         else:
             st.info("No prior connections found.")
 
@@ -351,15 +426,19 @@ else:
                     st.error("Missing critical data (PNM Information or Bump Teams).")
                     st.stop()
 
-                # 0. CLEAN COLUMNS
-                bump_teams.columns = bump_teams.columns.str.strip()
-                party_excuses.columns = party_excuses.columns.str.strip()
-                pnm_intial_interest.columns = pnm_intial_interest.columns.str.strip()
-                member_interest.columns = member_interest.columns.str.strip()
-                member_pnm_no_match.columns = member_pnm_no_match.columns.str.strip()
+                # --- 0. SMART COLUMN NORMALIZATION (THE FIX) ---
+                # This normalizes headers (whether from Form or Paste) to:
+                # 'Full Name', 'Major', 'Minor', 'Hometown', 'Year', 'Hobbies', etc.
+                pnm_working = standardize_columns(pnm_intial_interest.copy(), entity_type='pnm')
+                member_interest = standardize_columns(member_interest, entity_type='member')
+                
+                # Also normalize excuses and connections lightly to find names
+                if not party_excuses.empty:
+                    party_excuses.columns = party_excuses.columns.str.strip()
+                if not member_pnm_no_match.empty:
+                    member_pnm_no_match.columns = member_pnm_no_match.columns.str.strip()
 
-                # 1. PRE-PROCESSING
-                pnm_working = pnm_intial_interest.copy()
+                # --- 1. PRE-PROCESSING ---
                 
                 # Assignments
                 pnms_per_party = int(np.ceil(len(pnm_working) / num_of_parties))
@@ -368,23 +447,6 @@ else:
                 np.random.seed(42)
                 np.random.shuffle(party_assignments)
                 pnm_working['Party'] = party_assignments
-
-                # Column Mapping
-                pnm_col_map = {
-                    'PNM Name': 'Full Name',
-                    'Enter your hometown in the form City, State:': 'Hometown',
-                    'Enter your major or "Undecided":': 'Major',
-                    'Enter your minor or leave blank:': 'Minor',
-                    'Enter your high school involvement (sports, clubs etc.), separate each activity by a comma:': 'High School Involvement',
-                    'Enter your college involvement (sports, clubs etc.), separate each activity by a comma:': 'College Involvement',
-                    'Enter your hobbies and interests, separate each activity by a comma:': 'Hobbies',
-                    'Pick your year in school:': 'Year',
-                    'PNM ID': 'PNM ID',
-                    'Average Recruit Rank': 'Average Recruit Rank'
-                }
-                # Apply map only if columns exist
-                rename_dict = {k: v for k, v in pnm_col_map.items() if k in pnm_working.columns}
-                pnm_working.rename(columns=rename_dict, inplace=True)
                 
                 # --- GEOCODING ---
                 url_geo = "https://raw.githubusercontent.com/kelvins/US-Cities-Database/main/csv/us_cities.csv"
@@ -410,6 +472,7 @@ else:
                 all_coords = []
                 geo_tracker = []
                 
+                # Members
                 for idx, row in member_interest.iterrows():
                     if 'Hometown' in row:
                         lat, lon = get_coords_offline(row['Hometown'])
@@ -417,6 +480,7 @@ else:
                             all_coords.append([radians(lat), radians(lon)])
                             geo_tracker.append({'type': 'mem', 'id': row['Sorority ID'], 'hometown': row['Hometown']})
                 
+                # PNMs
                 for idx, row in pnm_working.iterrows():
                     if 'Hometown' in row:
                         lat, lon = get_coords_offline(row['Hometown'])
@@ -449,16 +513,18 @@ else:
                     combined = ", ".join([p for p in text_parts if p != 'nan' and p.strip() != ''])
                     return [t.strip() for t in combined.split(',') if t.strip()]
 
+                cols_to_extract = ['Major', 'Minor', 'Hobbies', 'College Involvement', 'High School Involvement']
+
                 mem_interest_map = []
                 for idx, row in member_interest.iterrows():
-                    terms = extract_terms(row, ['Major', 'Minor', 'Hobbies', 'College Involvement', 'High School Involvement'])
+                    terms = extract_terms(row, cols_to_extract)
                     for term in terms:
                         all_terms_list.append(term)
                         mem_interest_map.append({'id': row['Sorority ID'], 'term': term})
                         
                 pnm_interest_map = []
                 for idx, row in pnm_working.iterrows():
-                    terms = extract_terms(row, ['Major', 'Minor', 'Hobbies', 'College Involvement', 'High School Involvement'])
+                    terms = extract_terms(row, cols_to_extract)
                     for term in terms:
                         all_terms_list.append(term)
                         pnm_interest_map.append({'id': row['PNM ID'], 'term': term})
@@ -506,21 +572,29 @@ else:
                 pnm_working['attributes_for_matching'] = pnm_working['PNM ID'].map(lambda x: ", ".join(pnm_final_attrs.get(x, set())))
 
                 # 2. MATCHING LOGIC SETUP
-                if "Full Name" not in member_interest.columns and "First Name" in member_interest.columns:
-                    member_interest["Full Name"] = member_interest["First Name"] + " " + member_interest["Last Name"]
-                
                 # Handling Party Excuses
-                party_excuses["Choose the party/parties you are unable to attend:"] = party_excuses["Choose the party/parties you are unable to attend:"].apply(
-                    lambda x: [int(i) for i in re.findall(r'\d+', str(x))] if pd.notnull(x) else []
-                )
-                party_excuses_exploded = party_excuses.explode("Choose the party/parties you are unable to attend:")
+                # Find column for excuses
+                excuse_col = next((c for c in party_excuses.columns if "party" in c.lower() and "attend" in c.lower()), None)
+                if excuse_col:
+                    party_excuses[excuse_col] = party_excuses[excuse_col].apply(
+                        lambda x: [int(i) for i in re.findall(r'\d+', str(x))] if pd.notnull(x) else []
+                    )
+                    party_excuses_exploded = party_excuses.explode(excuse_col)
+                else:
+                    party_excuses_exploded = pd.DataFrame(columns=['Member Name', 'Party'])
 
-                # Handling No Matches (Assuming Exploded Format in CSV based on sheet view)
-                no_match_pairs = {
-                    (row["Member Name"], row["PNM Name"])
-                    for row in member_pnm_no_match.to_dict('records')
-                    if pd.notna(row.get("Member Name")) and pd.notna(row.get("PNM Name"))
-                }
+                # Handling No Matches
+                no_match_pairs = set()
+                if not member_pnm_no_match.empty:
+                    # Try to find Member Name and PNM Name columns dynamically
+                    m_col = next((c for c in member_pnm_no_match.columns if 'member' in c.lower() and 'name' in c.lower()), None)
+                    p_col = next((c for c in member_pnm_no_match.columns if 'pnm' in c.lower() and 'name' in c.lower()), None)
+                    if m_col and p_col:
+                        no_match_pairs = {
+                            (row[m_col], row[p_col])
+                            for row in member_pnm_no_match.to_dict('records')
+                            if pd.notna(row.get(m_col)) and pd.notna(row.get(p_col))
+                        }
                 
                 member_attr_cache = {
                     row['Sorority ID']: set(str(row.get('attributes_for_matching', '')).split(', '))
@@ -546,7 +620,7 @@ else:
             
             results_buffers = []
 
-            # Internal Function Definitions (Same as provided code)
+            # Internal Function Definitions
             def run_internal_rotation(assignment_map, team_list, method='flow'):
                 rotation_output = []
                 actual_rounds = 1 if bump_order_set == 'yes' else num_rounds_party
@@ -680,7 +754,6 @@ else:
 
             # --- PARTY LOOP ---
             for party in range(1, num_of_parties + 1):
-                # with st.spinner(f"Processing Party {party}..."): (nested spinner warn)
                 pnms_df = pnm_working[pnm_working['Party'] == party].copy()
                 if pnms_df.empty:
                     progress_bar.progress(party / num_of_parties)
@@ -689,14 +762,24 @@ else:
                 pnm_list = []
                 for i, row in enumerate(pnms_df.to_dict('records')):
                     p_attrs = set(str(row.get('attributes_for_matching', '')).split(', '))
-                    p_rank = float(row.get("Average Recruit Rank", 1.0))
+                    try:
+                        p_rank = float(row.get("Average Recruit Rank", 1.0))
+                    except: p_rank = 1.0
+                    
                     pnm_list.append({
                         'idx': i, 'id': row['PNM ID'], 'name': row['Full Name'],
                         'attrs': p_attrs, 'rank': p_rank, 'bonus': 0.75 * (p_rank - 1),
                         'node_id': f"p_{i}"
                     })
 
-                party_excused_names = set(party_excuses_exploded[party_excuses_exploded["Choose the party/parties you are unable to attend:"] == party]["Member Name"])
+                # Fix Excuses Logic with standardized names
+                party_excused_names = set()
+                if not party_excuses_exploded.empty:
+                    # Find names in excuses (first column typically)
+                    name_col_ex = party_excuses_exploded.columns[1] if len(party_excuses_exploded.columns) > 1 else party_excuses_exploded.columns[0]
+                    # Find party column in excuses
+                    if excuse_col:
+                        party_excused_names = set(party_excuses_exploded[party_excuses_exploded[excuse_col] == party][name_col_ex])
                 
                 team_list = []
                 for raw_idx, row in enumerate(bump_teams.to_dict('records')):
@@ -862,7 +945,6 @@ else:
                     df_rot_flow = pd.DataFrame(internal_flow_results)
                     df_rot_greedy = pd.DataFrame(internal_greedy_results)
                     
-                    # --- APPLY USER MODIFICATIONS HERE ---
                     if 'Team ID' in df_rot_flow.columns: df_rot_flow = df_rot_flow.drop(columns=['Team ID'])
                     if 'Team ID' in df_rot_greedy.columns: df_rot_greedy = df_rot_greedy.drop(columns=['Team ID'])
 
