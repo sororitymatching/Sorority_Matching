@@ -422,7 +422,7 @@ else:
         if not df_conn.empty: st.dataframe(df_conn, use_container_width=True)
         else: st.info("No prior connections found.")
 
-    # --- TAB 7: RUN MATCHING ---
+    # --- TAB 7: RUN MATCHING (MODIFIED) ---
     with tab7:
         st.subheader("Matching Configuration")
         c1, c2 = st.columns(2)
@@ -432,12 +432,13 @@ else:
 
         if st.button("Run Matching Algorithm"):
             with st.spinner("Fetching data and processing matching logic..."):
-                # 1. LOAD DATA
+                # 1. LOAD DATA & SETTINGS
                 parties_val = get_setting_value('B1')
-                num_parties = int(parties_val) if parties_val and str(parties_val).isdigit() else 4
+                num_of_parties = int(parties_val) if parties_val and str(parties_val).isdigit() else 4
+                st.info(f"Using {num_of_parties} parties (configured in Settings).")
+                
                 active_roster = get_active_roster_names()
                 
-                # Fetch Sheets
                 bump_teams = get_data("Bump Teams")
                 party_excuses = get_data("Party Excuses")
                 member_interest = get_data("Member Information")
@@ -448,13 +449,30 @@ else:
                     st.error("Missing critical data (PNM Info or Bump Teams).")
                     st.stop()
 
-                # 2. STANDARDIZE COLUMNS
+                # --- 2. PARTY ASSIGNMENT (NEW LOGIC) ---
+                # A. Select first 1665 rows (or less if not available)
+                limit = 1665
+                if len(pnm_intial_interest) > limit:
+                    pnm_intial_interest = pnm_intial_interest.iloc[0:limit].copy()
+                
+                # B. Calculate Assignments
+                n_total = len(pnm_intial_interest)
+                if num_of_parties > 0:
+                    pnms_per_party = int(np.ceil(n_total / num_of_parties))
+                    party_assignments = np.tile(np.arange(1, num_of_parties + 1), pnms_per_party)[:n_total]
+                    np.random.seed(42)
+                    np.random.shuffle(party_assignments)
+                    pnm_intial_interest['Party'] = party_assignments
+                else:
+                    pnm_intial_interest['Party'] = 1 # Fallback
+                
+                # 3. STANDARDIZE COLUMNS
                 pnm_working = standardize_columns(pnm_intial_interest.copy(), entity_type='pnm')
                 member_interest = standardize_columns(member_interest, entity_type='member')
                 if not party_excuses.empty: party_excuses.columns = party_excuses.columns.str.strip()
                 if not member_pnm_no_match.empty: member_pnm_no_match.columns = member_pnm_no_match.columns.str.strip()
 
-                # 3. FILTER MEMBERS (ROSTER)
+                # 4. FILTER MEMBERS (ROSTER)
                 if active_roster and not member_interest.empty:
                     active_set = set(n.strip().lower() for n in active_roster)
                     member_interest = member_interest[member_interest['Full Name'].astype(str).str.strip().str.lower().isin(active_set)]
@@ -462,14 +480,6 @@ else:
                 if member_interest.empty:
                     st.error("No valid members found for matching.")
                     st.stop()
-
-                # 4. PARTY ASSIGNMENT LOGIC (Dynamic Tiling)
-                n_pnms = len(pnm_working)
-                pnms_per_party = int(np.ceil(n_pnms / num_parties))
-                party_assignments = np.tile(np.arange(1, num_parties + 1), pnms_per_party)[:n_pnms]
-                np.random.seed(42)
-                np.random.shuffle(party_assignments)
-                pnm_working['Party'] = party_assignments
 
                 # 5. GEOCODING & CLUSTERING (OFFLINE)
                 city_coords_map, ALL_CITY_KEYS = load_geo_data()
@@ -632,9 +642,7 @@ else:
                                 except: pass
                             
                             elif method == 'greedy':
-                                # Simplified greedy logic for brevity in this block
                                 used_p, used_m = set(), set()
-                                # (Score logic similar to global but per round - skipped detailed implementation for length constraint)
                                 pass 
                     return output
 
@@ -647,11 +655,10 @@ else:
                     return df[df['Bump'].notna()].rename(columns={'Matched Member': 'You', 'Bump': 'Bump This Person'}).to_dict('records')
 
                 # LOOP PARTIES
-                for party in range(1, num_parties + 1):
+                for party in range(1, num_of_parties + 1):
                     sub_pnm = pnm_working[pnm_working['Party'] == party]
                     if sub_pnm.empty: continue
                     
-                    # Prepare Node Lists
                     pnm_nodes = []
                     for i, r in enumerate(sub_pnm.to_dict('records')):
                         try: p_rank = float(r.get("Average Recruit Rank", 1.0))
@@ -661,11 +668,10 @@ else:
                             'id': r['PNM ID'], 'name': r['Full Name'], 
                             'attrs': set(str(r.get('attributes_for_matching', '')).split(', ')),
                             'rank': p_rank,
-                            'bonus': 0.75 * (p_rank - 1),  # ADDED THIS LINE TO FIX KEYERROR
+                            'bonus': 0.75 * (p_rank - 1),
                             'node': f"p_{i}"
                         })
                     
-                    # Prepare Teams (Filtered by Excuses)
                     excused = set()
                     if excuse_col and not party_excuses_exploded.empty:
                         excused = set(party_excuses_exploded[party_excuses_exploded[excuse_col] == party][party_excuses_exploded.columns[1]])
@@ -682,7 +688,6 @@ else:
                             'node': f"t_{i}", 'row_data': r
                         })
                     
-                    # Global Matching (Flow)
                     G = nx.DiGraph()
                     G.add_node('s', demand=-len(pnm_nodes)); G.add_node('t', demand=len(pnm_nodes))
                     G.add_edge('dummy', 't', capacity=len(pnm_nodes), weight=0)
@@ -710,7 +715,6 @@ else:
                             
                     for t in team_nodes: G.add_edge(t['node'], 't', capacity=num_pnm_matches_needed, weight=0)
                     
-                    # Solve Global
                     assign_map = {t['t_idx']: [] for t in team_nodes}
                     results_global = []
                     pair_dict = dict(pairs)
@@ -730,11 +734,9 @@ else:
                             if not matched: results_global.append({'PNM': p['name'], 'Team': 'NO MATCH', 'Reason': 'Conflict/Capacity'})
                     except: st.error(f"Party {party} failed optimization.")
 
-                    # Internal Rotations (Flow)
                     rot_results = run_internal_rotation(assign_map, team_nodes, 'flow')
                     bump_results = gen_instructions(rot_results)
                     
-                    # Save to Excel
                     out = io.BytesIO()
                     with pd.ExcelWriter(out, engine='xlsxwriter') as writer:
                         pd.DataFrame(results_global).to_excel(writer, sheet_name="Global_Matches", index=False)
@@ -742,7 +744,7 @@ else:
                         pd.DataFrame(bump_results).to_excel(writer, sheet_name="Bump_Instructions", index=False)
                     
                     buffers.append({'party': party, 'data': out.getvalue()})
-                    prog.progress(party / num_parties)
+                    prog.progress(party / num_of_parties)
             
             st.success("Done!")
             for b in buffers:
