@@ -317,7 +317,7 @@ with tab3:
                     st.error(f"Error: {e}")
 
 # ==========================
-# TAB 4: VIEW PNM INFORMATION & RANKING (MODIFIED)
+# TAB 4: VIEW PNM INFORMATION & RANKING
 # ==========================
 with tab4:
     st.header("PNM Roster & Information")
@@ -379,13 +379,21 @@ with tab4:
             # Display Profile
             st.markdown(f"### 👤 {curr_pnm_name} (ID: {curr_pnm_id})")
             st.divider()
+            
             col1, col2 = st.columns(2)
             fields = list(pnm_data.items())
             mid = (len(fields) + 1) // 2
+            
+            # Helper to remove trailing colon from the Question text
+            # This ensures "Are you involved...:" displays as "Are you involved...: Answer"
+            # instead of "Are you involved...:: Answer"
+            def clean_key(k):
+                return k.strip().rstrip(":")
+
             with col1:
-                for k,v in fields[:mid]: st.info(f"**{k}:** {v}")
+                for k,v in fields[:mid]: st.info(f"**{clean_key(k)}:** {v}")
             with col2:
-                for k,v in fields[mid:]: st.info(f"**{k}:** {v}")
+                for k,v in fields[mid:]: st.info(f"**{clean_key(k)}:** {v}")
 
             # --- RANKING FORM ---
             st.divider()
