@@ -79,6 +79,29 @@ def get_party_options():
 
 @st.cache_data(ttl=300)
 def get_roster():
+    """
+    Fetches the roster. 
+    PRIORITY 1: Checks 'Settings' tab (Column D) for an override list (from CSV upload).
+    PRIORITY 2: Falls back to 'Member Information' tab if Settings is empty.
+    """
+    # 1. Try checking for an override in Settings (Column D)
+    try:
+        sheet_settings = get_sheet("Settings")
+        if sheet_settings:
+            # Admin dashboard usually writes roster to D2:D
+            override_data = sheet_settings.col_values(4) 
+            
+            # Clean data (remove empty strings)
+            clean_override = [n.strip() for n in override_data if n.strip()]
+            
+            # If we found names (assuming valid list), return them
+            if clean_override:
+                return sorted(clean_override)
+    except Exception:
+        # If Settings fails or doesn't exist, ignore and proceed to fallback
+        pass
+
+    # 2. Fallback to Member Information (Original Logic)
     try:
         sheet = get_sheet("Member Information")
         if not sheet: return []
