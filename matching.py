@@ -188,21 +188,26 @@ if st.button("Run Matching Algorithm"):
         
         # --- 1. PRE-PROCESSING ---
         
-        # MEMBERS: Check for "Full Name" first, otherwise construct it
+        # MEMBERS: Check for "Full Name"
         if "Full Name" not in member_interest.columns:
+             # Fallback if specific column is missing
              if "First Name" in member_interest.columns and "Last Name" in member_interest.columns:
                   member_interest["Full Name"] = member_interest["First Name"] + " " + member_interest["Last Name"]
              else:
-                  st.error("Member sheet missing 'Full Name' column (and missing 'First Name'/'Last Name' to construct it).")
+                  st.error("Member sheet missing 'Full Name' column.")
                   st.stop()
 
-        # PNMS: Check for "Full Name" first, otherwise construct it
+        # PNMS: Check for "PNM Name" and normalize to "Full Name"
         pnm_working = pnm_intial_interest.copy()
-        if "Full Name" not in pnm_working.columns:
+        
+        if "PNM Name" in pnm_working.columns:
+             pnm_working["Full Name"] = pnm_working["PNM Name"]
+        elif "Full Name" not in pnm_working.columns:
+             # Fallback if neither PNM Name nor Full Name exist
              if "First Name" in pnm_working.columns and "Last Name" in pnm_working.columns:
                   pnm_working["Full Name"] = pnm_working["First Name"] + " " + pnm_working["Last Name"]
              else:
-                  st.error("PNM sheet missing 'Full Name' column (and missing 'First Name'/'Last Name' to construct it).")
+                  st.error("PNM sheet missing 'PNM Name' column.")
                   st.stop()
         
         # MERGE RANKINGS
