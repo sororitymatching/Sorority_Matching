@@ -422,7 +422,7 @@ else:
         if not df_conn.empty: st.dataframe(df_conn, use_container_width=True)
         else: st.info("No prior connections found.")
 
-    # --- TAB 7: RUN MATCHING (UPDATED LOGIC) ---
+    # --- TAB 7: RUN MATCHING (MODIFIED) ---
     with tab7:
         st.subheader("Matching Configuration")
         c1, c2 = st.columns(2)
@@ -449,37 +449,28 @@ else:
                     st.error("Missing critical data (PNM Info or Bump Teams).")
                     st.stop()
 
-                # --- 2. PARTY ASSIGNMENT & STANDARDIZATION ---
-                # A. Clean Columns first
-                pnm_intial_interest.columns = pnm_intial_interest.columns.str.strip()
-                bump_teams.columns = bump_teams.columns.str.strip()
-                member_interest.columns = member_interest.columns.str.strip()
+                # --- 2. PARTY ASSIGNMENT (DATA PROCESSING) ---
+                limit = 1665
+                if len(pnm_intial_interest) > limit:
+                    pnm_intial_interest = pnm_intial_interest.iloc[0:limit].copy()
                 
-                # B. Limit Data if necessary (matches original app logic)
-                pnm_working = pnm_intial_interest.iloc[0:1665].copy()
-                
-                # C. Assign Parties
-                pnms_per_party = 45 # Default fallback
-                if len(pnm_working) < pnms_per_party: pnms_per_party = len(pnm_working)
-                
-                # If number of parties is configured, distribute evenly
+                n_total = len(pnm_intial_interest)
                 if num_of_parties > 0:
-                    party_assignments = np.tile(np.arange(1, num_of_parties + 1), int(np.ceil(len(pnm_working)/num_of_parties)))
-                    if len(party_assignments) > len(pnm_working):
-                        party_assignments = party_assignments[:len(pnm_working)]
+                    pnms_per_party = int(np.ceil(n_total / num_of_parties))
+                    party_assignments = np.tile(np.arange(1, num_of_parties + 1), pnms_per_party)[:n_total]
                     np.random.seed(42)
                     np.random.shuffle(party_assignments)
-                    pnm_working['Party'] = party_assignments
+                    pnm_intial_interest['Party'] = party_assignments
                 else:
-                    pnm_working['Party'] = 1
-
-                # D. Standardize Column Names using Admin Helper
-                pnm_working = standardize_columns(pnm_working, entity_type='pnm')
+                    pnm_intial_interest['Party'] = 1 
+                
+                # 3. STANDARDIZE COLUMNS
+                pnm_working = standardize_columns(pnm_intial_interest.copy(), entity_type='pnm')
                 member_interest = standardize_columns(member_interest, entity_type='member')
                 if not party_excuses.empty: party_excuses.columns = party_excuses.columns.str.strip()
                 if not member_pnm_no_match.empty: member_pnm_no_match.columns = member_pnm_no_match.columns.str.strip()
 
-                # E. Filter Members based on Active Roster
+                # 4. FILTER MEMBERS (ROSTER)
                 if active_roster and not member_interest.empty:
                     active_set = set(n.strip().lower() for n in active_roster)
                     member_interest = member_interest[member_interest['Full Name'].astype(str).str.strip().str.lower().isin(active_set)]
@@ -488,167 +479,156 @@ else:
                     st.error("No valid members found for matching.")
                     st.stop()
 
-                # 3. GEOCODING & CLUSTERING
+                # 5. GEOCODING & CLUSTERING (ALIGNED WITH STREAMLIT_APP)
                 city_coords_map, ALL_CITY_KEYS = load_geo_data()
 
-                def get_coords(hometown):
-                    if not isinstance(hometown, str): return None
-                    key = hometown.strip().upper()
+                def get_coords_offline(hometown_str):
+                    if not isinstance(hometown_str, str): return None, None
+                    key = hometown_str.strip().upper()
                     if key in city_coords_map: return city_coords_map[key]
                     matches = difflib.get_close_matches(key, ALL_CITY_KEYS, n=1, cutoff=0.8)
-                    return city_coords_map[matches[0]] if matches else None
+                    if matches: return city_coords_map[matches[0]]
+                    return None, None
 
-                all_coords, geo_tracker = [], []
+                all_coords = []
+                geo_tracker = []
                 
-                for df, type_ in [(member_interest, 'mem'), (pnm_working, 'pnm')]:
-                    id_col = 'Sorority ID' if type_ == 'mem' else 'PNM ID'
-                    for idx, row in df.iterrows():
-                        if 'Hometown' in row:
-                            coords = get_coords(row['Hometown'])
-                            if coords:
-                                all_coords.append([radians(c) for c in coords])
-                                geo_tracker.append({'type': type_, 'id': row[id_col], 'hometown': row['Hometown']})
+                for idx, row in member_interest.iterrows():
+                    if 'Hometown' in row:
+                        lat, lon = get_coords_offline(row['Hometown'])
+                        if lat:
+                            all_coords.append([radians(lat), radians(lon)])
+                            geo_tracker.append({'type': 'mem', 'id': row['Sorority ID'], 'hometown': row['Hometown']})
+                
+                for idx, row in pnm_working.iterrows():
+                    if 'Hometown' in row:
+                        lat, lon = get_coords_offline(row['Hometown'])
+                        if lat:
+                            all_coords.append([radians(lat), radians(lon)])
+                            geo_tracker.append({'type': 'pnm', 'id': row['PNM ID'], 'hometown': row['Hometown']})
 
-                mem_geo_tags, pnm_geo_tags = {}, {}
+                mem_geo_tags = {}
+                pnm_geo_tags = {}
+
                 if all_coords:
                     dist_matrix = haversine_distances(all_coords, all_coords) * 3958.8
                     geo_clustering = AgglomerativeClustering(n_clusters=None, distance_threshold=30, metric='precomputed', linkage='single')
                     geo_labels = geo_clustering.fit_predict(dist_matrix)
-                    
                     geo_groups = {}
                     for i, label in enumerate(geo_labels):
                         if label not in geo_groups: geo_groups[label] = []
                         geo_groups[label].append(geo_tracker[i]['hometown'])
-                    
                     for i, label in enumerate(geo_labels):
-                        grp = geo_groups[label][0]
-                        trk = geo_tracker[i]
-                        if trk['type'] == 'mem': mem_geo_tags[trk['id']] = grp
-                        else: pnm_geo_tags[trk['id']] = grp
+                        group_name = geo_groups[label][0]
+                        tracker = geo_tracker[i]
+                        if tracker['type'] == 'mem': mem_geo_tags[tracker['id']] = group_name
+                        else: pnm_geo_tags[tracker['id']] = group_name
 
-                # 4. SEMANTIC CLUSTERING
+                # 6. SEMANTIC CLUSTERING (ALIGNED WITH STREAMLIT_APP)
                 model = load_model()
-                all_terms, interest_maps = [], {'mem': [], 'pnm': []}
-                cols_extract = ['Major', 'Minor', 'Hobbies', 'College Involvement', 'High School Involvement']
+                all_terms_list = []
+                def extract_terms(row, cols):
+                    text_parts = [str(row.get(c, '')).lower() for c in cols]
+                    combined = ", ".join([p for p in text_parts if p != 'nan' and p.strip() != ''])
+                    return [t.strip() for t in combined.split(',') if t.strip()]
 
-                for df, type_ in [(member_interest, 'mem'), (pnm_working, 'pnm')]:
-                    id_col = 'Sorority ID' if type_ == 'mem' else 'PNM ID'
-                    for idx, row in df.iterrows():
-                        text_parts = [str(row.get(c, '')).lower() for c in cols_extract]
-                        combined = ", ".join([p for p in text_parts if p != 'nan' and p.strip() != ''])
-                        terms = [t.strip() for t in combined.split(',') if t.strip()]
-                        for term in terms:
-                            all_terms.append(term)
-                            interest_maps[type_].append({'id': row[id_col], 'term': term})
-                
+                mem_interest_map = []
+                # Use standard columns defined in standardize_columns
+                cols_to_extract = ['Major', 'Minor', 'Hobbies', 'College Involvement', 'High School Involvement']
+                for idx, row in member_interest.iterrows():
+                    terms = extract_terms(row, cols_to_extract)
+                    for term in terms:
+                        all_terms_list.append(term)
+                        mem_interest_map.append({'id': row['Sorority ID'], 'term': term})
+                        
+                pnm_interest_map = []
+                for idx, row in pnm_working.iterrows():
+                    terms = extract_terms(row, cols_to_extract)
+                    for term in terms:
+                        all_terms_list.append(term)
+                        pnm_interest_map.append({'id': row['PNM ID'], 'term': term})
+
                 term_to_group = {}
-                if all_terms:
-                    u_terms = list(set(all_terms))
-                    embeddings = model.encode(u_terms)
-                    sem_labels = AgglomerativeClustering(n_clusters=None, distance_threshold=0.5, metric='cosine', linkage='average').fit_predict(embeddings)
-                    
+                if all_terms_list:
+                    unique_terms = list(set(all_terms_list))
+                    embeddings = model.encode(unique_terms)
+                    sem_clustering = AgglomerativeClustering(n_clusters=None, distance_threshold=0.5, metric='cosine', linkage='average')
+                    sem_labels = sem_clustering.fit_predict(embeddings)
                     temp_map = {}
-                    for term, label in zip(u_terms, sem_labels):
+                    for term, label in zip(unique_terms, sem_labels):
                         if label not in temp_map: temp_map[label] = []
                         temp_map[label].append(term)
-                    
-                    for terms in temp_map.values():
+                    for label, terms in temp_map.items():
                         attr_name = min(terms, key=len)
-                        for t in terms: term_to_group[t] = attr_name
+                        for term in terms: term_to_group[term] = attr_name
 
-                # 5. FINALIZE ATTRIBUTES
-                def get_year_tag(y):
-                    if pd.isna(y): return None
-                    m = difflib.get_close_matches(str(y).strip(), ["Freshman", "Sophomore", "Junior", "Senior"], n=1, cutoff=0.6)
-                    return m[0] if m else str(y).strip().title()
+                # 7. FINALIZE ATTRIBUTES (ALIGNED WITH STREAMLIT_APP)
+                VALID_YEARS = ["Freshman", "Sophomore", "Junior", "Senior"]
+                def get_year_tag(year_val):
+                    if pd.isna(year_val): return None
+                    raw = str(year_val).strip()
+                    matches = difflib.get_close_matches(raw, VALID_YEARS, n=1, cutoff=0.6)
+                    return matches[0] if matches else raw.title()
 
-                for df, type_, tag_map in [(member_interest, 'mem', mem_geo_tags), (pnm_working, 'pnm', pnm_geo_tags)]:
-                    id_col = 'Sorority ID' if type_ == 'mem' else 'PNM ID'
-                    final_attrs = {row[id_col]: set() for _, row in df.iterrows()}
-                    
-                    for idx, row in df.iterrows():
-                        pid = row[id_col]
-                        yt = get_year_tag(row.get('Year'))
-                        if yt: final_attrs[pid].add(yt)
-                        if pid in tag_map: final_attrs[pid].add(tag_map[pid])
-                        
-                    for entry in interest_maps[type_]:
-                        if entry['term'] in term_to_group: final_attrs[entry['id']].add(term_to_group[entry['term']])
-                    
-                    df['attributes_for_matching'] = df[id_col].map(lambda x: ", ".join(final_attrs.get(x, set())))
+                mem_final_attrs = {row['Sorority ID']: set() for _, row in member_interest.iterrows()}
+                for idx, row in member_interest.iterrows():
+                    pid = row['Sorority ID']
+                    yt = get_year_tag(row.get('Year'))
+                    if yt: mem_final_attrs[pid].add(yt)
+                    if pid in mem_geo_tags: mem_final_attrs[pid].add(mem_geo_tags[pid])
+                for entry in mem_interest_map:
+                    if entry['term'] in term_to_group: mem_final_attrs[entry['id']].add(term_to_group[entry['term']])
+                member_interest['attributes_for_matching'] = member_interest['Sorority ID'].map(lambda x: ", ".join(mem_final_attrs.get(x, set())))
 
-                # --- 6. MATCHING DATA PREP (ALIGNED WITH STREAMLIT_APP LOGIC) ---
-                
-                # Ensure Name Columns match expected format for internal logic
-                # (Standardize_columns above already ensures 'Full Name' exists, but we ensure consistency here)
-                if 'Full Name' not in member_interest.columns and 'First Name' in member_interest.columns:
-                    member_interest["Full Name"] = member_interest["First Name"] + " " + member_interest["Last Name"]
-                
-                # PNM Working is standardized to 'Full Name' above, but map to 'Enter your name:' for compatibility if needed
-                if 'Enter your name:' not in pnm_working.columns:
-                    pnm_working["Enter your name:"] = pnm_working['Full Name']
+                pnm_final_attrs = {row['PNM ID']: set() for _, row in pnm_working.iterrows()}
+                for idx, row in pnm_working.iterrows():
+                    pid = row['PNM ID']
+                    yt = get_year_tag(row.get('Year'))
+                    if yt: pnm_final_attrs[pid].add(yt)
+                    if pid in pnm_geo_tags: pnm_final_attrs[pid].add(pnm_geo_tags[pid])
+                for entry in pnm_interest_map:
+                    if entry['term'] in term_to_group: pnm_final_attrs[entry['id']].add(term_to_group[entry['term']])
+                pnm_working['attributes_for_matching'] = pnm_working['PNM ID'].map(lambda x: ", ".join(pnm_final_attrs.get(x, set())))
 
-                # Handle Party Excuses: Extract integers from string list and explode
-                # Logic: Converts "[1, 2]" into actual list objects then creates a row per party
-                if "Choose the party/parties you are unable to attend:" in party_excuses.columns:
-                    party_excuses["Choose the party/parties you are unable to attend:"] = party_excuses["Choose the party/parties you are unable to attend:"].apply(
-                        lambda x: [int(i) for i in re.findall(r'\d+', str(x))] if pd.notnull(x) else []
-                    )
-                    party_excuses_exploded = party_excuses.explode("Choose the party/parties you are unable to attend:")
-                else:
-                    # Fallback if specific column name missing in Admin View
-                    excuse_col = next((c for c in party_excuses.columns if "party" in c.lower()), None)
-                    if excuse_col:
-                        party_excuses["Choose the party/parties you are unable to attend:"] = party_excuses[excuse_col].apply(
-                            lambda x: [int(i) for i in re.findall(r'\d+', str(x))] if pd.notnull(x) else []
-                        )
-                        party_excuses_exploded = party_excuses.explode("Choose the party/parties you are unable to attend:")
-                    else:
-                        party_excuses_exploded = pd.DataFrame()
+                # 8. MATCHING SETUP
+                # Process excuses
+                excuse_col = next((c for c in party_excuses.columns if "party" in c.lower() and "attend" in c.lower()), None)
+                party_excuses_exploded = party_excuses.explode(excuse_col) if excuse_col and not party_excuses.empty else pd.DataFrame(columns=['Member Name', 'Party'])
+                if excuse_col: 
+                    party_excuses[excuse_col] = party_excuses[excuse_col].apply(lambda x: [int(i) for i in re.findall(r'\d+', str(x))] if pd.notnull(x) else [])
+                    party_excuses_exploded = party_excuses.explode(excuse_col)
 
-                # Handle No Match: Split comma-separated PNM names and explode
-                nm_col = "Choose the PNM or PNMs you should NOT match with:"
-                if nm_col not in member_pnm_no_match.columns:
-                     # Attempt to find it if exact name doesn't exist (Admin robustness)
-                     nm_col = next((c for c in member_pnm_no_match.columns if "match" in c.lower() and "not" in c.lower()), nm_col)
-                
-                if nm_col in member_pnm_no_match.columns:
-                    member_pnm_no_match[nm_col] = member_pnm_no_match[nm_col].str.split(r',\s*', regex=True)
-                    no_match_exploded = member_pnm_no_match.explode(nm_col)
-                else:
-                    no_match_exploded = pd.DataFrame()
-                
-                # Build No-Match Pair Set for fast lookup during iteration
-                # We map the admin column 'Full Name' (or found Creator col) to 'Choose your name:' for compatibility
-                nm_name_col = next((c for c in no_match_exploded.columns if "name" in c.lower() and "pnm" not in c.lower()), "Choose your name:")
-                
+                # Process No Match
                 no_match_pairs = set()
-                if not no_match_exploded.empty:
-                    no_match_pairs = {
-                        (row[nm_name_col], row[nm_col])
-                        for row in no_match_exploded.to_dict('records')
-                        if pd.notna(row.get(nm_name_col)) and pd.notna(row.get(nm_col))
-                    }
+                if not member_pnm_no_match.empty:
+                    m_c = next((c for c in member_pnm_no_match.columns if 'member' in c.lower() and 'name' in c.lower()), None)
+                    p_c = next((c for c in member_pnm_no_match.columns if 'pnm' in c.lower() and 'name' in c.lower()), None)
+                    if m_c and p_c:
+                         # Split comma separated PNMs
+                        member_pnm_no_match[p_c] = member_pnm_no_match[p_c].str.split(r',\s*', regex=True)
+                        no_match_exploded = member_pnm_no_match.explode(p_c)
+                        no_match_pairs = {(r[m_c], r[p_c]) for r in no_match_exploded.to_dict('records') if pd.notna(r.get(m_c))}
 
-                # Build Attribute Cache: Map Sorority ID to a set of their matching attributes
                 member_attr_cache = {
                     row['Sorority ID']: set(str(row.get('attributes_for_matching', '')).split(', '))
                     if row.get('attributes_for_matching') else set()
                     for row in member_interest.to_dict('records')
                 }
-
-                # Map names to IDs for internal rotation logic
-                name_to_id_map = member_interest.set_index('Full Name')['Sorority ID'].to_dict()
-
-                # Calculate Trait Weights based on inverse frequency across the chapter
+                name_to_id_map = {r['Full Name']: r['Sorority ID'] for i, r in member_interest.iterrows() if r.get('Full Name')}
+                
+                # Weight calculation from streamlit_app.py
                 all_member_traits = member_interest['attributes_for_matching'].str.split(', ').explode()
                 trait_freq = all_member_traits.value_counts()
                 trait_weights = (len(member_interest) / trait_freq).to_dict()
-
-                # Chapter-standard strength bonus mapping
                 strength_bonus_map = {1: 1.5, 2: 1.0, 3: 0.5, 4: 0.0}
 
-                # --- 7. INTERNAL ROTATION LOGIC ---
+                # --- 9. EXECUTION LOOP (ALIGNED WITH STREAMLIT_APP) ---
+                st.write("---")
+                st.write("### Results")
+                progress_bar = st.progress(0)
+                results_buffers = []
+
+                # --- DEFINE INTERNAL ROTATION LOGIC (NESTED TO ACCESS CACHES) ---
                 def run_internal_rotation(assignment_map, team_list, method='flow'):
                     rotation_output = []
                     actual_rounds = 1 if bump_order_set == 'yes' else num_rounds_party
@@ -657,10 +637,11 @@ else:
                         if not assigned_pnms: continue
                         team_data = next((t for t in team_list if t['t_idx'] == t_idx), None)
                         if not team_data: continue
-                        
-                        # Try to find RGL from raw data, handle flexible column names
-                        rgl_keys = [k for k in team_data['row_data'].keys() if 'RGL' in k]
-                        raw_rgl = team_data['row_data'].get(rgl_keys[0], '') if rgl_keys else ''
+
+                        # Clean RGL name extraction based on Admin View columns (might differ slightly, so we look for "RGL")
+                        row_keys = list(team_data['row_data'].keys())
+                        rgl_key = next((k for k in row_keys if 'RGL' in k), None)
+                        raw_rgl = team_data['row_data'].get(rgl_key, '') if rgl_key else ''
                         team_rgl_name = "" if pd.isna(raw_rgl) or str(raw_rgl).lower() == 'nan' else str(raw_rgl).strip()
 
                         valid_members = []
@@ -722,7 +703,8 @@ else:
                                                     })
                                                     history.add((p['p_id'], m_id_ex))
                                 except nx.NetworkXUnfeasible:
-                                     rotation_output.append({'Round': round_num, 'Team ID': t_idx, 'PNM Name': "FLOW FAIL", 'Reason': "Unfeasible"})
+                                     fail_reason = "Unfeasible (Capacity)"
+                                     rotation_output.append({'Round': round_num, 'Team ID': t_idx, 'PNM Name': "FLOW FAIL", 'Reason': fail_reason})
 
                             elif method == 'greedy':
                                 candidates = []
@@ -781,9 +763,7 @@ else:
                     })
                     return output.sort_values(by=['Member (You)', 'At End Of Round']).to_dict('records')
 
-                # --- 8. EXECUTION LOOP ---
-                st.write("---"); st.write("### Results"); progress_bar = st.progress(0); results_buffers = []
-
+                # --- PARTY LOOP ---
                 for party in range(1, num_of_parties + 1):
                     with st.spinner(f"Processing Party {party}..."):
                         pnms_df = pnm_working[pnm_working['Party'] == party].copy()
@@ -794,9 +774,9 @@ else:
                         pnm_list = []
                         for i, row in enumerate(pnms_df.to_dict('records')):
                             p_attrs = set(str(row['attributes_for_matching']).split(', '))
-                            # Handle variable names for rank
-                            rank_key = next((k for k in row.keys() if 'rank' in k.lower()), None)
-                            try: p_rank = float(row.get(rank_key, 1.0))
+                            # Handle Rank normalization if column differs
+                            rank_val = row.get("Average Recruit Rank", row.get("Recruit Rank", 1.0))
+                            try: p_rank = float(rank_val)
                             except: p_rank = 1.0
                             
                             pnm_list.append({
@@ -805,31 +785,31 @@ else:
                                 'node_id': f"p_{i}"
                             })
 
-                        # Get Party Excuses
+                        # Filter Excused
                         party_excused_names = set()
-                        if not party_excuses_exploded.empty:
-                            mask = party_excuses_exploded["Party"].astype(str) == str(party)
-                            # Handle variable column names for excuses in Admin View
-                            ex_name_col = next((c for c in party_excuses_exploded.columns if "name" in c.lower()), "Choose your name:")
-                            party_excused_names = set(party_excuses_exploded[mask][ex_name_col])
+                        if excuse_col and not party_excuses_exploded.empty:
+                            party_excused_names = set(party_excuses_exploded[party_excuses_exploded[excuse_col] == party][party_excuses_exploded.columns[1]]) # Assumes name is col 1
                         
                         team_list = []
+                        # Build teams from Bump Teams sheet
+                        creator_col = next((c for c in bump_teams.columns if 'creator' in c.lower()), bump_teams.columns[1] if len(bump_teams.columns)>1 else None)
+                        partners_col = next((c for c in bump_teams.columns if 'partner' in c.lower()), bump_teams.columns[2] if len(bump_teams.columns)>2 else None)
+                        rank_col = next((c for c in bump_teams.columns if 'rank' in c.lower()), None)
+                        
                         for raw_idx, row in enumerate(bump_teams.to_dict('records')):
-                            # Flexible column grabbing for teams
-                            creator = row.get("Choose your name:") or row.get("Creator Name") or ""
-                            partners_str = str(row.get("Choose the name(s) of your bump partner(s):", "") or row.get("Bump Partners", ""))
+                            submitter = row.get(creator_col, "Unknown")
+                            partners_str = str(row.get(partners_col, ""))
                             partners = [p.strip() for p in re.split(r'[,;]\s*', partners_str) if p.strip()] if partners_str.lower() != 'nan' else []
-                            current_members = [creator] + partners
+                            current_members = [submitter] + partners
                             
-                            if any(m in party_excused_names for m in current_members): continue 
+                            if any(m in party_excused_names for m in current_members):
+                                continue 
                             
-                            # Flexible rank
-                            rank_k = next((k for k in row.keys() if 'rank' in k.lower()), None)
                             t_rank = 4
-                            if rank_k:
-                                try: t_rank = int(float(row[rank_k]))
-                                except: pass
-
+                            if rank_col:
+                                try: t_rank = int(float(row.get(rank_col, 4)))
+                                except: t_rank = 4
+                                
                             team_list.append({
                                 't_idx': len(team_list), 'members': current_members, 'team_size': len(current_members),
                                 'member_ids': [name_to_id_map.get(m) for m in current_members],
