@@ -239,19 +239,17 @@ def auto_adjust_columns(writer, sheet_name, df):
 # --- SMART COLUMN MAPPING HELPER ---
 def standardize_columns(df, entity_type='pnm'):
     """
-    Renames columns from various inputs (Form Questions OR Simple Paste Headers)
-    to the standard names required by the algorithm.
+    Renames columns from various inputs to the standard names required by the algorithm.
+    Includes fix for duplicate columns preventing ValueErrors.
     """
     df.columns = df.columns.str.strip()
     
-    # Dictionary of {Canonical_Name: [List of possible header substrings]}
-    # The code checks if the column header CONTAINS these strings (case-insensitive)
     mappings = {
         'Full Name': ['name', 'member name', 'pnm name', 'student name'],
         'Major': ['major', 'program of study'],
         'Minor': ['minor'],
         'Hometown': ['hometown', 'city', 'state'],
-        'Year': ['year', 'grade', 'class', 'academic year', 'year in school'],
+        'Year': ['year', 'grade', 'class', 'academic year'],
         'Hobbies': ['hobbies', 'interests', 'fun facts'],
         'College Involvement': ['college involvement', 'campus activities', 'organizations'],
         'High School Involvement': ['high school', 'hs involvement'],
@@ -263,7 +261,6 @@ def standardize_columns(df, entity_type='pnm'):
 
     # 1. Try to find matches
     for canonical, possibilities in mappings.items():
-        # strict preference for exact matches first
         found = False
         for col in df.columns:
             if col in used_cols: continue
@@ -273,41 +270,53 @@ def standardize_columns(df, entity_type='pnm'):
                 found = True
                 break
         
-        # fuzzy match if exact not found
         if not found:
             for col in df.columns:
                 if col in used_cols: continue
-                # Check if any keyword is in the column name
                 if any(p in col.lower() for p in possibilities):
                     new_cols[col] = canonical
                     used_cols.add(col)
                     break
     
-    # 2. Rename
+    # 2. Rename columns
     df = df.rename(columns=new_cols)
     
-    # 3. Generate IDs if missing (Crucial for pasted data)
+    # --- CRITICAL FIX: Remove Duplicate Columns ---
+    # This prevents df['ID'] from returning a DataFrame if multiple columns mapped to 'ID'
+    df = df.loc[:, ~df.columns.duplicated()]
+    
+    # 3. Handle IDs
     id_col = 'PNM ID' if entity_type == 'pnm' else 'Sorority ID'
     
-    # If we mapped something to 'ID', rename it to specific ID
+    # If we found a generic 'ID', rename it to the specific ID type
     if 'ID' in df.columns:
         df.rename(columns={'ID': id_col}, inplace=True)
+        # Deduplicate again in case the specific ID column already existed
+        df = df.loc[:, ~df.columns.duplicated()]
     
-    # If ID column doesn't exist or has blanks, generate them
+    # If ID column doesn't exist, create it
     if id_col not in df.columns:
         df[id_col] = range(1, len(df) + 1)
     else:
-        # Fill empty/NaN IDs with generated ones
+        # Clean existing IDs
         df[id_col] = df[id_col].replace('', np.nan)
+        
+        # Ensure we are working with a Series (extra safety check)
+        if isinstance(df[id_col], pd.DataFrame):
+            # If duplicates somehow persist, take the first one
+            df[id_col] = df[id_col].iloc[:, 0]
+
+        # Fill missing IDs
         if df[id_col].isnull().any():
-            # Find max existing ID to continue sequence
             try:
+                # Get max existing ID to continue sequence
                 max_id = pd.to_numeric(df[id_col], errors='coerce').max()
                 if pd.isna(max_id): max_id = 0
             except:
                 max_id = 0
             
-            fill_values = range(int(max_id) + 1, int(max_id) + 1 + df[id_col].isnull().sum())
+            missing_count = df[id_col].isnull().sum()
+            fill_values = range(int(max_id) + 1, int(max_id) + 1 + missing_count)
             df.loc[df[id_col].isnull(), id_col] = fill_values
 
     return df
