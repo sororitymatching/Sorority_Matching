@@ -384,9 +384,6 @@ with tab4:
             fields = list(pnm_data.items())
             mid = (len(fields) + 1) // 2
             
-            # Helper to remove trailing colon from the Question text
-            # This ensures "Are you involved...:" displays as "Are you involved...: Answer"
-            # instead of "Are you involved...:: Answer"
             def clean_key(k):
                 return k.strip().rstrip(":")
 
@@ -454,58 +451,70 @@ with tab4:
 with tab5:
     st.header("Prior PNM Connections")
     
-    # 1. Select Member & PNM (Outside form)
+    # 1. LOAD DATA & PREPARE OPTIONS
+    df_conn = get_pnm_dataframe()
+    conn_options = [""]
+    conn_lookup = {} # Maps "ID - Name" -> (Name, ID)
+
+    if not df_conn.empty:
+        # Identify Columns (Same logic as Tab 4)
+        id_col = next((c for c in df_conn.columns if c.strip().lower() == 'pnm id'), None)
+        if not id_col: id_col = next((c for c in df_conn.columns if 'id' in c.lower()), df_conn.columns[0])
+        name_col = next((c for c in df_conn.columns if 'name' in c.lower()), df_conn.columns[1])
+        
+        for idx, row in df_conn.iterrows():
+            p_id = str(row[id_col]).strip()
+            p_name = str(row[name_col]).strip()
+            label = f"{p_id} - {p_name}"
+            conn_options.append(label)
+            conn_lookup[label] = (p_name, p_id)
+
     col1, col2 = st.columns(2)
     with col1:
         conn_member = st.selectbox("Your Name:", [""] + roster, key="conn_mem")
     with col2:
-        conn_pnm = st.selectbox("PNM Name:", [""] + pnm_list, key="conn_pnm")
+        # MODIFIED: Select from ID - Name list
+        conn_selection = st.selectbox("PNM (ID - Name):", conn_options, key="conn_pnm")
+
+    # Resolve selection to actual data
+    conn_pnm_name = ""
+    conn_pnm_id = ""
+    if conn_selection and conn_selection in conn_lookup:
+        conn_pnm_name, conn_pnm_id = conn_lookup[conn_selection]
 
     existing_conn_row = None
     
-    # 2. Check Existence
-    if conn_member and conn_pnm:
+    # 2. Check Existence using the resolved Name
+    if conn_member and conn_pnm_name:
         sheet_conn = get_sheet("Prior Connections")
         if sheet_conn:
-            # Search: Member (Col 2) AND PNM (Col 4)
-            c_idx, c_vals = find_row_composite(sheet_conn, 2, conn_member, 4, conn_pnm)
+            # Search: Member (Col 2) AND PNM Name (Col 4)
+            c_idx, c_vals = find_row_composite(sheet_conn, 2, conn_member, 4, conn_pnm_name)
             if c_idx:
                 existing_conn_row = c_idx
-                st.info(f"ℹ️ You already have a connection logged with {conn_pnm}. Submitting again will update the timestamp.")
+                st.info(f"ℹ️ You already have a connection logged with {conn_pnm_name}. Submitting again will update the timestamp.")
 
     with st.form(key='connection_form'):
         submit_connection = st.form_submit_button(label='Submit/Update Connection')
 
     if submit_connection:
-        if not conn_member or not conn_pnm:
+        if not conn_member or not conn_pnm_name:
             st.warning("⚠️ Please select both names.")
         else:
             sheet_conn = get_sheet("Prior Connections")
             sheet_mem = get_sheet("Member Information")
-            sheet_pnm = get_sheet("PNM Information")
 
-            if sheet_conn and sheet_mem and sheet_pnm:
+            if sheet_conn and sheet_mem:
                 try:
-                    # IDs
+                    # Member ID
                     m_idx, m_vals = find_row_by_col(sheet_mem, 3, conn_member)
                     m_id = m_vals[0] if m_vals else "?"
                     
-                    # For PNM ID, we need to search PNM sheet
-                    pnm_vals = sheet_pnm.get_all_values()
-                    p_id = "?"
-                    if pnm_vals:
-                        headers = [h.lower() for h in pnm_vals[0]]
-                        name_idx = next((i for i,h in enumerate(headers) if 'name' in h), 1)
-                        # Look for 'id' generally or specifically 'pnm id'
-                        id_idx = next((i for i,h in enumerate(headers) if 'id' in h), 0)
-                        
-                        for row in pnm_vals[1:]:
-                            if len(row) > name_idx and row[name_idx].strip() == conn_pnm:
-                                if len(row) > id_idx: p_id = row[id_idx]
-                                break
+                    # PNM ID (We already have it from the selection!)
+                    p_id = conn_pnm_id if conn_pnm_id else "?"
 
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    row_data = [timestamp, conn_member, m_id, conn_pnm, p_id]
+                    row_data = [timestamp, conn_member, m_id, conn_pnm_name, p_id]
                     
                     if existing_conn_row:
                         sheet_conn.update(f"A{existing_conn_row}:E{existing_conn_row}", [row_data])
