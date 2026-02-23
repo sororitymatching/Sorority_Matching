@@ -46,53 +46,18 @@ def get_gc():
     return gspread.service_account_from_dict(creds_dict, scopes=SCOPES)
 
 def get_data(worksheet_name):
-    """
-    Robustly attempts to find a worksheet.
-    1. Tries exact match.
-    2. Tries case-insensitive/stripped match.
-    3. If searching for 'PNM Information', looks for any tab with 'PNM' and 'Info'.
-    """
+    """Gets all data and standardizes headers slightly."""
     try:
         gc = get_gc()
-        sh = gc.open(SHEET_NAME)
-    except Exception as e:
-        st.error(f"Could not open Google Sheet '{SHEET_NAME}'. Error: {e}")
-        return pd.DataFrame()
-
-    found_sheet = None
-    
-    # 1. Try Exact Match
-    try:
-        found_sheet = sh.worksheet(worksheet_name)
-    except gspread.WorksheetNotFound:
-        # 2. Try Fuzzy Match (Ignore case/spaces)
-        all_sheets = sh.worksheets()
-        for ws in all_sheets:
-            if ws.title.strip().lower() == worksheet_name.strip().lower():
-                found_sheet = ws
-                break
-        
-        # 3. Special Fallback for PNM Information
-        if not found_sheet and "PNM" in worksheet_name:
-            for ws in all_sheets:
-                if "pnm" in ws.title.lower() and "info" in ws.title.lower():
-                    found_sheet = ws
-                    break
-        
-        if not found_sheet:
-            # Only show error if it's the critical PNM sheet, otherwise just return empty (e.g. for optional sheets)
-            if "PNM" in worksheet_name:
-                st.error(f"❌ Could not find tab '{worksheet_name}'. Found these tabs: {[w.title for w in all_sheets]}")
-            return pd.DataFrame()
-
-    try:
-        data = found_sheet.get_all_values()
+        sheet = gc.open(SHEET_NAME).worksheet(worksheet_name)
+        data = sheet.get_all_values()
         if not data: return pd.DataFrame()
         df = pd.DataFrame(data[1:], columns=data[0])
         df.columns = df.columns.str.strip()
         return df
     except Exception as e:
-        st.error(f"Error reading data from '{found_sheet.title}': {e}")
+        if worksheet_name == "PNM Information":
+             st.warning("Could not find 'PNM Information' tab.")
         return pd.DataFrame()
 
 def get_setting_value(cell):
@@ -217,7 +182,7 @@ def auto_adjust_columns(writer, sheet_name, df):
 def standardize_columns(df, entity_type='pnm'):
     df.columns = df.columns.str.strip()
     mappings = {
-        'Full Name': ['name', 'member name', 'pnm name', 'student name', 'choose your name', 'enter your name'],
+        'Full Name': ['name', 'member name', 'pnm name', 'student name', 'enter your name:'],
         'Major': ['major', 'program of study'],
         'Minor': ['minor'],
         'Hometown': ['hometown', 'city', 'state'],
@@ -457,7 +422,7 @@ else:
         if not df_conn.empty: st.dataframe(df_conn, use_container_width=True)
         else: st.info("No prior connections found.")
 
-    # --- TAB 7: RUN MATCHING (UPDATED) ---
+    # --- TAB 7: RUN MATCHING (UPDATED LOGIC) ---
     with tab7:
         st.subheader("Matching Configuration")
         c1, c2 = st.columns(2)
@@ -466,55 +431,66 @@ else:
         bump_order_set = st.radio("Is the bump order set?", ["yes", "no"], index=1)
 
         if st.button("Run Matching Algorithm"):
-            with st.spinner("Fetching data and initializing..."):
+            with st.spinner("Fetching data and processing matching logic..."):
                 # 1. LOAD DATA & SETTINGS
                 parties_val = get_setting_value('B1')
                 num_of_parties = int(parties_val) if parties_val and str(parties_val).isdigit() else 4
-                st.info(f"Parties Configured: {num_of_parties}")
+                st.info(f"Using {num_of_parties} parties (configured in Settings).")
                 
                 active_roster = get_active_roster_names()
                 
-                # Fetch Raw Data from Sheets
                 bump_teams = get_data("Bump Teams")
                 party_excuses = get_data("Party Excuses")
-                member_interest_raw = get_data("Member Information")
+                member_interest = get_data("Member Information")
                 member_pnm_no_match = get_data("Prior Connections")
                 pnm_intial_interest = get_data("PNM Information")
 
-                if pnm_intial_interest.empty or bump_teams.empty or member_interest_raw.empty:
-                    st.error("Missing critical data (PNM Info, Bump Teams, or Member Info).")
+                if pnm_intial_interest.empty or bump_teams.empty:
+                    st.error("Missing critical data (PNM Info or Bump Teams).")
                     st.stop()
 
-                # 2. STANDARDIZE & PREP
-                pnm_working = standardize_columns(pnm_intial_interest.copy(), entity_type='pnm')
-                member_interest = standardize_columns(member_interest_raw.copy(), entity_type='member')
-                member_interest["Full Name"] = member_interest["Full Name"].astype(str).str.strip()
+                # --- 2. PARTY ASSIGNMENT & STANDARDIZATION ---
+                # A. Clean Columns first
+                pnm_intial_interest.columns = pnm_intial_interest.columns.str.strip()
+                bump_teams.columns = bump_teams.columns.str.strip()
+                member_interest.columns = member_interest.columns.str.strip()
                 
-                if not party_excuses.empty: party_excuses.columns = party_excuses.columns.str.strip()
-                if not member_pnm_no_match.empty: member_pnm_no_match.columns = member_pnm_no_match.columns.str.strip()
-
-                # Pre-Assign Parties (Simulation)
-                limit = 1665
-                if len(pnm_working) > limit: pnm_working = pnm_working.iloc[0:limit].copy()
-                n_total = len(pnm_working)
+                # B. Limit Data if necessary (matches original app logic)
+                pnm_working = pnm_intial_interest.iloc[0:1665].copy()
                 
-                # Filter active roster if available
-                if active_roster and not member_interest.empty:
-                    active_set = set(n.strip().lower() for n in active_roster)
-                    member_interest = member_interest[member_interest['Full Name'].str.lower().isin(active_set)]
-
+                # C. Assign Parties
+                pnms_per_party = 45 # Default fallback
+                if len(pnm_working) < pnms_per_party: pnms_per_party = len(pnm_working)
+                
+                # If number of parties is configured, distribute evenly
                 if num_of_parties > 0:
-                    pnms_per_party = int(np.ceil(n_total / num_of_parties))
-                    party_assignments = np.tile(np.arange(1, num_of_parties + 1), pnms_per_party)[:n_total]
+                    party_assignments = np.tile(np.arange(1, num_of_parties + 1), int(np.ceil(len(pnm_working)/num_of_parties)))
+                    if len(party_assignments) > len(pnm_working):
+                        party_assignments = party_assignments[:len(pnm_working)]
                     np.random.seed(42)
                     np.random.shuffle(party_assignments)
                     pnm_working['Party'] = party_assignments
                 else:
                     pnm_working['Party'] = 1
 
-                # 3. BUILD ATTRIBUTES (GEO + SEMANTIC)
-                # Note: Leveraging cached helper functions
+                # D. Standardize Column Names using Admin Helper
+                pnm_working = standardize_columns(pnm_working, entity_type='pnm')
+                member_interest = standardize_columns(member_interest, entity_type='member')
+                if not party_excuses.empty: party_excuses.columns = party_excuses.columns.str.strip()
+                if not member_pnm_no_match.empty: member_pnm_no_match.columns = member_pnm_no_match.columns.str.strip()
+
+                # E. Filter Members based on Active Roster
+                if active_roster and not member_interest.empty:
+                    active_set = set(n.strip().lower() for n in active_roster)
+                    member_interest = member_interest[member_interest['Full Name'].astype(str).str.strip().str.lower().isin(active_set)]
+                
+                if member_interest.empty:
+                    st.error("No valid members found for matching.")
+                    st.stop()
+
+                # 3. GEOCODING & CLUSTERING
                 city_coords_map, ALL_CITY_KEYS = load_geo_data()
+
                 def get_coords(hometown):
                     if not isinstance(hometown, str): return None
                     key = hometown.strip().upper()
@@ -523,6 +499,7 @@ else:
                     return city_coords_map[matches[0]] if matches else None
 
                 all_coords, geo_tracker = [], []
+                
                 for df, type_ in [(member_interest, 'mem'), (pnm_working, 'pnm')]:
                     id_col = 'Sorority ID' if type_ == 'mem' else 'PNM ID'
                     for idx, row in df.iterrows():
@@ -537,25 +514,29 @@ else:
                     dist_matrix = haversine_distances(all_coords, all_coords) * 3958.8
                     geo_clustering = AgglomerativeClustering(n_clusters=None, distance_threshold=30, metric='precomputed', linkage='single')
                     geo_labels = geo_clustering.fit_predict(dist_matrix)
+                    
                     geo_groups = {}
                     for i, label in enumerate(geo_labels):
                         if label not in geo_groups: geo_groups[label] = []
                         geo_groups[label].append(geo_tracker[i]['hometown'])
+                    
                     for i, label in enumerate(geo_labels):
                         grp = geo_groups[label][0]
                         trk = geo_tracker[i]
                         if trk['type'] == 'mem': mem_geo_tags[trk['id']] = grp
                         else: pnm_geo_tags[trk['id']] = grp
 
-                # Semantic
+                # 4. SEMANTIC CLUSTERING
                 model = load_model()
                 all_terms, interest_maps = [], {'mem': [], 'pnm': []}
                 cols_extract = ['Major', 'Minor', 'Hobbies', 'College Involvement', 'High School Involvement']
+
                 for df, type_ in [(member_interest, 'mem'), (pnm_working, 'pnm')]:
                     id_col = 'Sorority ID' if type_ == 'mem' else 'PNM ID'
                     for idx, row in df.iterrows():
-                        text = ", ".join([str(row.get(c, '')).lower() for c in cols_extract])
-                        terms = [t.strip() for t in text.split(',') if t.strip() and t.lower() != 'nan']
+                        text_parts = [str(row.get(c, '')).lower() for c in cols_extract]
+                        combined = ", ".join([p for p in text_parts if p != 'nan' and p.strip() != ''])
+                        terms = [t.strip() for t in combined.split(',') if t.strip()]
                         for term in terms:
                             all_terms.append(term)
                             interest_maps[type_].append({'id': row[id_col], 'term': term})
@@ -565,15 +546,17 @@ else:
                     u_terms = list(set(all_terms))
                     embeddings = model.encode(u_terms)
                     sem_labels = AgglomerativeClustering(n_clusters=None, distance_threshold=0.5, metric='cosine', linkage='average').fit_predict(embeddings)
+                    
                     temp_map = {}
                     for term, label in zip(u_terms, sem_labels):
                         if label not in temp_map: temp_map[label] = []
                         temp_map[label].append(term)
+                    
                     for terms in temp_map.values():
                         attr_name = min(terms, key=len)
                         for t in terms: term_to_group[t] = attr_name
 
-                # Finalize Attributes
+                # 5. FINALIZE ATTRIBUTES
                 def get_year_tag(y):
                     if pd.isna(y): return None
                     m = difflib.get_close_matches(str(y).strip(), ["Freshman", "Sophomore", "Junior", "Senior"], n=1, cutoff=0.6)
@@ -582,323 +565,426 @@ else:
                 for df, type_, tag_map in [(member_interest, 'mem', mem_geo_tags), (pnm_working, 'pnm', pnm_geo_tags)]:
                     id_col = 'Sorority ID' if type_ == 'mem' else 'PNM ID'
                     final_attrs = {row[id_col]: set() for _, row in df.iterrows()}
+                    
                     for idx, row in df.iterrows():
                         pid = row[id_col]
                         yt = get_year_tag(row.get('Year'))
                         if yt: final_attrs[pid].add(yt)
                         if pid in tag_map: final_attrs[pid].add(tag_map[pid])
+                        
                     for entry in interest_maps[type_]:
                         if entry['term'] in term_to_group: final_attrs[entry['id']].add(term_to_group[entry['term']])
+                    
                     df['attributes_for_matching'] = df[id_col].map(lambda x: ", ".join(final_attrs.get(x, set())))
 
-                # 4. PREP LISTS (Excuses / No Match)
-                # Dynamic column finding for Bump Teams
-                id_col_team = next((c for c in bump_teams.columns if 'team id' in c.lower() or 'id' in c.lower()), bump_teams.columns[4] if len(bump_teams.columns)>4 else None)
-                creator_col = next((c for c in bump_teams.columns if 'creator' in c.lower() or 'your name' in c.lower()), bump_teams.columns[1] if len(bump_teams.columns)>1 else None)
-                partners_col = next((c for c in bump_teams.columns if 'partner' in c.lower()), bump_teams.columns[2] if len(bump_teams.columns)>2 else None)
-                rank_col_team = next((c for c in bump_teams.columns if 'ranking' in c.lower() or 'rank' in c.lower()), None)
-                rgl_col = next((c for c in bump_teams.columns if 'leader' in c.lower() or 'rgl' in c.lower()), None)
-                
-                # Excuses
+                # 6. MATCHING DATA PREP
+                # Handle Party Excuses
                 excuse_col = next((c for c in party_excuses.columns if "party" in c.lower() and "attend" in c.lower()), None)
-                excuse_name_col = next((c for c in party_excuses.columns if "name" in c.lower()), None)
-                party_excuses_exploded = pd.DataFrame()
-                if excuse_col and excuse_name_col and not party_excuses.empty:
-                    party_excuses[excuse_col] = party_excuses[excuse_col].apply(lambda x: [int(i) for i in re.findall(r'\d+', str(x))] if pd.notnull(x) else [])
-                    party_excuses_exploded = party_excuses.explode(excuse_col)
+                party_excuses_exploded = pd.DataFrame(columns=['Choose your name:', 'Party'])
+                
+                if excuse_col and not party_excuses.empty: 
+                    # Try to find name column in excuses
+                    ex_name_col = next((c for c in party_excuses.columns if "name" in c.lower()), party_excuses.columns[1])
+                    temp_excuses = party_excuses.copy()
+                    temp_excuses[excuse_col] = temp_excuses[excuse_col].apply(lambda x: [int(i) for i in re.findall(r'\d+', str(x))] if pd.notnull(x) else [])
+                    party_excuses_exploded = temp_excuses.explode(excuse_col).rename(columns={ex_name_col: "Choose your name:", excuse_col: "Party"})
 
-                # No Matches
+                # Handle No Match
                 no_match_pairs = set()
                 if not member_pnm_no_match.empty:
-                    nm_mem = next((c for c in member_pnm_no_match.columns if 'name' in c.lower() and 'pnm' not in c.lower()), None)
-                    nm_pnm = next((c for c in member_pnm_no_match.columns if 'pnm' in c.lower()), None)
-                    if nm_mem and nm_pnm:
-                         member_pnm_no_match[nm_pnm] = member_pnm_no_match[nm_pnm].astype(str).str.split(r',\s*')
-                         exploded_nm = member_pnm_no_match.explode(nm_pnm)
-                         no_match_pairs = {(r[nm_mem], r[nm_pnm]) for r in exploded_nm.to_dict('records') if pd.notna(r.get(nm_mem))}
+                    m_c = next((c for c in member_pnm_no_match.columns if 'member' in c.lower() and 'name' in c.lower()), None)
+                    p_c = next((c for c in member_pnm_no_match.columns if 'pnm' in c.lower() and 'name' in c.lower()), None)
+                    if m_c and p_c:
+                         # Handle comma separated PNMs in no_match
+                        member_pnm_no_match[p_c] = member_pnm_no_match[p_c].str.split(r',\s*', regex=True)
+                        exploded_nm = member_pnm_no_match.explode(p_c)
+                        no_match_pairs = {(r[m_c], r[p_c]) for r in exploded_nm.to_dict('records') if pd.notna(r.get(m_c)) and pd.notna(r.get(p_c))}
 
-                # Caches
-                member_attr_cache = {
-                    row['Sorority ID']: set(str(row.get('attributes_for_matching', '')).split(', '))
-                    if row.get('attributes_for_matching') else set()
-                    for idx, row in member_interest.iterrows()
-                }
-                name_to_id_map = dict(zip(member_interest['Full Name'], member_interest['Sorority ID']))
-                all_traits = [t for attrs in member_attr_cache.values() for t in attrs]
-                trait_counts = pd.Series(all_traits).value_counts()
-                trait_weights = (len(member_interest) / trait_counts).to_dict() if not trait_counts.empty else {}
-                strength_bonus = {1: 1.5, 2: 1.0, 3: 0.5, 4: 0.0}
+                # Caches and Weights
+                member_attr_cache = {r['Sorority ID']: set(str(r.get('attributes_for_matching', '')).split(', ')) for r in member_interest.to_dict('records')}
+                name_to_id_map = {r['Full Name']: r['Sorority ID'] for i, r in member_interest.iterrows() if r.get('Full Name')}
+                
+                all_traits = member_interest['attributes_for_matching'].str.split(', ').explode()
+                trait_weights = (len(member_interest) / all_traits.value_counts()).to_dict()
+                strength_bonus_map = {1: 1.5, 2: 1.0, 3: 0.5, 4: 0.0}
 
-                # 5. EXECUTION LOGIC
-                st.write("---"); st.write("### Matching Results Log"); 
-                prog = st.progress(0); buffers = []
-                log_container = st.container()
+                # --- 7. INTERNAL ROTATION LOGIC ---
+                def run_internal_rotation(assignment_map, team_list, method='flow'):
+                    rotation_output = []
+                    actual_rounds = 1 if bump_order_set == 'yes' else num_rounds_party
 
-                # Internal Logic Functions
-                def run_internal_rotation(assign_map, t_list, method, actual_rounds):
-                    output = []
-                    for tid, pnms in assign_map.items():
-                        team = next((t for t in t_list if t['t_idx'] == tid), None)
-                        if not team or not pnms: continue
+                    for t_idx, assigned_pnms in assignment_map.items():
+                        if not assigned_pnms: continue
+                        team_data = next((t for t in team_list if t['t_idx'] == t_idx), None)
+                        if not team_data: continue
                         
-                        rgl_name = str(team['row_data'].get(rgl_col, '')).strip() if rgl_col else ""
-                        valid_mems = [{'id': mid, 'name': nm} for mid, nm in zip(team['member_ids'], team['members']) if mid]
+                        # Try to find RGL from raw data, handle flexible column names
+                        rgl_keys = [k for k in team_data['row_data'].keys() if 'RGL' in k]
+                        raw_rgl = team_data['row_data'].get(rgl_keys[0], '') if rgl_keys else ''
+                        team_rgl_name = "" if pd.isna(raw_rgl) or str(raw_rgl).lower() == 'nan' else str(raw_rgl).strip()
+
+                        valid_members = []
+                        for m_id, m_name in zip(team_data['member_ids'], team_data['members']):
+                            if m_id: valid_members.append({'id': m_id, 'name': m_name})
+
                         history = set()
 
-                        for r in range(1, actual_rounds + 1):
-                            if r == 1 and rgl_name:
-                                active = [m for m in valid_mems if m['name'] != rgl_name]
-                            else: active = valid_mems
+                        for round_num in range(1, actual_rounds + 1):
+                            if round_num == 1 and team_rgl_name:
+                                active_members = [m for m in valid_members if m['name'].strip() != team_rgl_name]
+                            else:
+                                active_members = valid_members
                             
-                            repeats_ok = r > len(active)
+                            must_allow_repeats = round_num > len(active_members)
 
                             if method == 'flow':
-                                SG = nx.DiGraph()
-                                SG.add_node('s', demand=-len(pnms)); SG.add_node('t', demand=len(pnms))
-                                for p in pnms: SG.add_edge('s', f"p_{p['p_id']}", capacity=1, weight=0)
-                                for m in active: SG.add_edge(f"m_{m['id']}", 't', capacity=1, weight=0)
+                                sub_G = nx.DiGraph()
+                                sub_s, sub_t = 's', 't'
+                                req = len(assigned_pnms)
+                                sub_G.add_node(sub_s, demand=-req)
+                                sub_G.add_node(sub_t, demand=req)
 
-                                for p in pnms:
-                                    for m in active:
-                                        if (p['p_id'], m['id']) in history and not repeats_ok: continue
-                                        shared = p['p_attrs'].intersection(member_attr_cache.get(m['id'], set()))
+                                for p in assigned_pnms:
+                                    sub_G.add_edge(sub_s, f"p_{p['p_id']}", capacity=1, weight=0)
+                                for m in active_members:
+                                    sub_G.add_edge(f"m_{m['id']}", sub_t, capacity=1, weight=0)
+
+                                for p in assigned_pnms:
+                                    for m in active_members:
+                                        is_repeat = (p['p_id'], m['id']) in history
+                                        if is_repeat and not must_allow_repeats: continue
+                                        m_attrs = member_attr_cache.get(m['id'], set())
+                                        shared = p['p_attrs'].intersection(m_attrs)
                                         score = sum(trait_weights.get(t, 1.0) for t in shared)
                                         base_cost = int((1/(1+score))*10000)
-                                        cost = base_cost + (50000 if (p['p_id'], m['id']) in history else 0)
+                                        final_cost = base_cost + 50000 if is_repeat else base_cost
                                         reason = ", ".join(shared) if shared else "Rotation"
-                                        SG.add_edge(f"p_{p['p_id']}", f"m_{m['id']}", capacity=1, weight=cost, reason=reason)
-                                
-                                try:
-                                    min_flow = nx.min_cost_flow(SG)
-                                    for p in pnms:
-                                        p_node = f"p_{p['p_id']}"
-                                        if p_node in min_flow:
-                                            for tgt, flow in min_flow[p_node].items():
-                                                if flow > 0 and tgt != 't':
-                                                    mid = int(tgt.replace('m_', ''))
-                                                    mname = next(m['name'] for m in active if m['id'] == mid)
-                                                    ed = SG.get_edge_data(p_node, tgt)
-                                                    output.append({
-                                                        'Round': r, 'Team ID': tid, 'Team Members': team['joined_names'],
-                                                        'PNM ID': p['p_id'], 'PNM Name': p['p_name'], 'Matched Member': mname,
-                                                        'Match Cost': round(ed['weight']/10000.0, 4), 'Reason': ed.get('reason')
-                                                    })
-                                                    history.add((p['p_id'], mid))
-                                except: pass
-                            
-                            elif method == 'greedy':
-                                available_mems = [m for m in active]
-                                for p in pnms:
-                                    best_m, best_score = None, -1
-                                    for m in available_mems:
-                                        if (p['p_id'], m['id']) in history and not repeats_ok: continue
-                                        shared = p['p_attrs'].intersection(member_attr_cache.get(m['id'], set()))
-                                        score = sum(trait_weights.get(t, 1.0) for t in shared)
-                                        if score > best_score: best_m, best_score = m, score
-                                    
-                                    if best_m:
-                                        output.append({
-                                            'Round': r, 'Team ID': tid, 'Team Members': team['joined_names'],
-                                            'PNM ID': p['p_id'], 'PNM Name': p['p_name'], 'Matched Member': best_m['name'],
-                                            'Match Cost': round(1/(1+best_score), 4), 'Reason': "Greedy"
-                                        })
-                                        history.add((p['p_id'], best_m['id']))
-                                        available_mems.remove(best_m)
-                    return output
+                                        if is_repeat: reason += " (Repeat)"
+                                        sub_G.add_edge(f"p_{p['p_id']}", f"m_{m['id']}", capacity=1, weight=final_cost, reason=reason)
 
-                def gen_instructions(rot_data):
-                    if not rot_data: return []
-                    df = pd.DataFrame(rot_data)
+                                try:
+                                    sub_flow = nx.min_cost_flow(sub_G)
+                                    for p in assigned_pnms:
+                                        p_node = f"p_{p['p_id']}"
+                                        if p_node in sub_flow:
+                                            for tgt, flow in sub_flow[p_node].items():
+                                                if flow > 0 and tgt != sub_t:
+                                                    m_id_ex = int(tgt.replace("m_", ""))
+                                                    m_name = next((m['name'] for m in valid_members if m['id'] == m_id_ex), "Unknown")
+                                                    edge_d = sub_G.get_edge_data(p_node, tgt)
+                                                    raw_weight = edge_d.get('weight', 10000)
+                                                    if raw_weight > 40000: raw_weight -= 50000
+                                                    calc_cost = raw_weight / 10000.0
+                                                    rotation_output.append({
+                                                        'Round': round_num, 'Team ID': t_idx, 'Team Members': team_data['joined_names'],
+                                                        'PNM ID': p['p_id'], 'PNM Name': p['p_name'], 'Matched Member': m_name,
+                                                        'Match Cost': round(calc_cost, 4), 'Reason': f"Common: {edge_d.get('reason')}"
+                                                    })
+                                                    history.add((p['p_id'], m_id_ex))
+                                except nx.NetworkXUnfeasible:
+                                     rotation_output.append({'Round': round_num, 'Team ID': t_idx, 'PNM Name': "FLOW FAIL", 'Reason': "Unfeasible"})
+
+                            elif method == 'greedy':
+                                candidates = []
+                                for p in assigned_pnms:
+                                    for m in active_members:
+                                        is_repeat = (p['p_id'], m['id']) in history
+                                        if is_repeat and not must_allow_repeats: continue
+                                        m_attrs = member_attr_cache.get(m['id'], set())
+                                        shared = p['p_attrs'].intersection(m_attrs)
+                                        score = sum(trait_weights.get(t, 1.0) for t in shared)
+                                        final_score = score - 1000 if is_repeat else score
+                                        reason = ", ".join(shared) if shared else "Rotation"
+                                        if is_repeat: reason += " (Repeat)"
+                                        candidates.append((final_score, p, m, reason, is_repeat))
+
+                                candidates.sort(key=lambda x: x[0], reverse=True)
+                                round_pnm_done, round_mem_done = set(), set()
+
+                                for sc, p, m, rs, is_rep in candidates:
+                                    if p['p_id'] not in round_pnm_done and m['id'] not in round_mem_done:
+                                        real_score = sc + 1000 if is_rep else sc
+                                        calc_cost = 1.0 / (1.0 + real_score)
+                                        rotation_output.append({
+                                            'Round': round_num, 'Team ID': t_idx, 'Team Members': team_data['joined_names'],
+                                            'PNM ID': p['p_id'], 'PNM Name': p['p_name'], 'Matched Member': m['name'],
+                                            'Match Cost': round(calc_cost, 4), 'Reason': f"Common: {rs}" if real_score > 0 else "Greedy Fill"
+                                        })
+                                        round_pnm_done.add(p['p_id']); round_mem_done.add(m['id']); history.add((p['p_id'], m['id']))
+
+                                for p in assigned_pnms:
+                                    if p['p_id'] not in round_pnm_done:
+                                        for m in active_members:
+                                            if m['id'] not in round_mem_done:
+                                                m_attrs = member_attr_cache.get(m['id'], set())
+                                                shared = p['p_attrs'].intersection(m_attrs)
+                                                score = sum(trait_weights.get(t, 1.0) for t in shared)
+                                                rotation_output.append({
+                                                    'Round': round_num, 'Team ID': t_idx, 'Team Members': team_data['joined_names'],
+                                                    'PNM ID': p['p_id'], 'PNM Name': p['p_name'], 'Matched Member': m['name'],
+                                                    'Match Cost': round(1.0 / (1.0 + score), 4), 'Reason': "Forced Greedy Fill"
+                                                })
+                                                round_pnm_done.add(p['p_id']); round_mem_done.add(m['id']); history.add((p['p_id'], m['id']))
+                                                break
+                    return rotation_output
+
+                def generate_bump_instructions(rotation_data):
+                    if not rotation_data: return []
+                    df = pd.DataFrame(rotation_data)
                     if df.empty or 'Matched Member' not in df.columns: return []
                     df = df.sort_values(by=['Team ID', 'PNM ID', 'Round'])
-                    df['Bump'] = df.groupby(['Team ID', 'PNM ID'])['Matched Member'].shift(1)
-                    inst = df[df['Bump'].notna()].copy()
-                    inst['At End Of Round'] = inst['Round'] - 1
-                    return inst[['Matched Member', 'At End Of Round', 'Bump', 'PNM Name']].rename(
-                        columns={'Matched Member': 'Member (You)', 'Bump': 'Go Bump This Person', 'PNM Name': 'Who is with PNM'}
-                    ).to_dict('records')
+                    df['Person_To_Bump'] = df.groupby(['Team ID', 'PNM ID'])['Matched Member'].shift(1)
+                    instructions = df[df['Person_To_Bump'].notna()].copy()
+                    instructions['At End Of Round'] = instructions['Round'] - 1
+                    output = instructions[['Matched Member', 'At End Of Round', 'Person_To_Bump', 'PNM Name']].rename(columns={
+                        'Matched Member': 'Member (You)', 'Person_To_Bump': 'Go Bump This Person', 'PNM Name': 'Who is with PNM'
+                    })
+                    return output.sort_values(by=['Member (You)', 'At End Of Round']).to_dict('records')
 
-                # LOOP PARTIES
+                # --- 8. EXECUTION LOOP ---
+                st.write("---"); st.write("### Results"); progress_bar = st.progress(0); results_buffers = []
+
                 for party in range(1, num_of_parties + 1):
-                    pnms_df = pnm_working[pnm_working['Party'] == party]
-                    
-                    pnm_nodes = []
-                    for _, row in pnms_df.iterrows():
-                        p_attrs = set(str(row['attributes_for_matching']).split(', '))
-                        try: p_rank = float(row.get("Average Recruit Rank", 1.0))
-                        except: p_rank = 1.0
-                        pnm_nodes.append({
-                            'id': row['PNM ID'], 'name': row['Full Name'], 'attrs': p_attrs,
-                            'rank': p_rank, 'bonus': 0.75 * (p_rank - 1), 'node': f"p_{row['PNM ID']}"
-                        })
+                    with st.spinner(f"Processing Party {party}..."):
+                        pnms_df = pnm_working[pnm_working['Party'] == party].copy()
+                        if pnms_df.empty:
+                            progress_bar.progress(party / num_of_parties)
+                            continue
+                            
+                        pnm_list = []
+                        for i, row in enumerate(pnms_df.to_dict('records')):
+                            p_attrs = set(str(row['attributes_for_matching']).split(', '))
+                            # Handle variable names for rank
+                            rank_key = next((k for k in row.keys() if 'rank' in k.lower()), None)
+                            try: p_rank = float(row.get(rank_key, 1.0))
+                            except: p_rank = 1.0
+                            
+                            pnm_list.append({
+                                'idx': i, 'id': row['PNM ID'], 'name': row['Full Name'],
+                                'attrs': p_attrs, 'rank': p_rank, 'bonus': 0.75 * (p_rank - 1),
+                                'node_id': f"p_{i}"
+                            })
 
-                    excused_names = set()
-                    if not party_excuses_exploded.empty and excuse_col:
-                        excused_names = set(party_excuses_exploded[party_excuses_exploded[excuse_col] == party][excuse_name_col])
-
-                    team_nodes = []
-                    broken_teams = []
-                    
-                    for idx, row in bump_teams.iterrows():
-                        creator = row[creator_col]
-                        partners = [p.strip() for p in re.split(r'[,;]\s*', str(row.get(partners_col, ""))) if p.strip()]
-                        members = [creator] + partners
-                        missing = [m for m in members if m in excused_names]
+                        # Get Party Excuses
+                        party_excused_names = set()
+                        if not party_excuses_exploded.empty:
+                            mask = party_excuses_exploded["Party"].astype(str) == str(party)
+                            party_excused_names = set(party_excuses_exploded[mask]["Choose your name:"])
                         
-                        if missing:
-                            broken_teams.append(f"{', '.join(members)} (Missing: {', '.join(missing)})")
-                        else:
-                            try: tr = int(float(row.get(rank_col_team, 4)))
-                            except: tr = 4
-                            team_nodes.append({
-                                't_idx': idx, 'members': members, 'joined_names': ", ".join(members),
-                                'member_ids': [name_to_id_map.get(m) for m in members],
-                                'bonus': strength_bonus.get(tr, 0.0), 'node': f"t_{idx}", 'row_data': row,
-                                'capacity': num_pnm_matches_needed
+                        team_list = []
+                        for raw_idx, row in enumerate(bump_teams.to_dict('records')):
+                            # Flexible column grabbing for teams
+                            creator = row.get("Choose your name:") or row.get("Creator Name") or ""
+                            partners_str = str(row.get("Choose the name(s) of your bump partner(s):", "") or row.get("Bump Partners", ""))
+                            partners = [p.strip() for p in re.split(r'[,;]\s*', partners_str) if p.strip()] if partners_str.lower() != 'nan' else []
+                            current_members = [creator] + partners
+                            
+                            if any(m in party_excused_names for m in current_members): continue 
+                            
+                            # Flexible rank
+                            rank_k = next((k for k in row.keys() if 'rank' in k.lower()), None)
+                            t_rank = 4
+                            if rank_k:
+                                try: t_rank = int(float(row[rank_k]))
+                                except: pass
+
+                            team_list.append({
+                                't_idx': len(team_list), 'members': current_members, 'team_size': len(current_members),
+                                'member_ids': [name_to_id_map.get(m) for m in current_members],
+                                'joined_names': ", ".join(current_members),
+                                'bonus': strength_bonus_map.get(t_rank, 0.0),
+                                'node_id': f"t_{len(team_list)}", 'row_data': row
                             })
 
-                    with log_container.expander(f"Party {party} Log", expanded=False):
-                        if broken_teams: st.warning(f"Broken Teams Removed: {len(broken_teams)}")
-                        for b in broken_teams: st.write(f"- {b}")
-
-                    potential_pairs = []
-                    for p in pnm_nodes:
-                        for t in team_nodes:
-                            if any((m, p['name']) in no_match_pairs for m in t['members']): continue
-                            score = 0
-                            reasons = []
-                            for mid, mname in zip(t['member_ids'], t['members']):
-                                if mid:
-                                    shared = p['attrs'].intersection(member_attr_cache.get(mid, set()))
-                                    if shared:
-                                        score += sum(trait_weights.get(tr, 1.0) for tr in shared)
-                                        reasons.append(f"{mname} ({', '.join(shared)})")
-                            
-                            total_score = score + p['bonus'] + t['bonus']
-                            cost = 1 / (1 + total_score)
-                            
-                            potential_pairs.append({
-                                'p_node': p['node'], 't_node': t['node'], 'cost': cost,
-                                'p_id': p['id'], 'p_name': p['name'], 'p_attrs': p['attrs'],
-                                't_idx': t['t_idx'], 'team_members': t['joined_names'], 'reasons': "; ".join(reasons)
-                            })
-                    
-                    # Global Flow
-                    G = nx.DiGraph()
-                    src, sink, dummy = 'source', 'sink', 'dummy_nomatch'
-                    total_flow = len(pnm_nodes)
-                    G.add_node(src, demand=-total_flow); G.add_node(sink, demand=total_flow); G.add_node(dummy)
-                    for p in pnm_nodes:
-                        G.add_edge(src, p['node'], capacity=1, weight=0)
-                        G.add_edge(p['node'], dummy, capacity=1, weight=1000000)
-                    for t in team_nodes:
-                        G.add_edge(t['node'], sink, capacity=t['capacity'], weight=0)
-                    G.add_edge(dummy, sink, capacity=total_flow, weight=0)
-                    
-                    pair_lookup = {}
-                    for pair in potential_pairs:
-                        G.add_edge(pair['p_node'], pair['t_node'], capacity=1, weight=int(pair['cost']*10000))
-                        pair_lookup[(pair['p_node'], pair['t_node'])] = pair
-
-                    global_results = []
-                    global_greedy = []
-                    assign_map_flow = {t['t_idx']: [] for t in team_nodes}
-                    assign_map_greedy = {t['t_idx']: [] for t in team_nodes}
-
-                    # A. Flow
-                    try:
-                        flow_dict = nx.min_cost_flow(G)
-                        for p in pnm_nodes:
-                            matched = False
-                            if p['node'] in flow_dict:
-                                for tgt, amt in flow_dict[p['node']].items():
-                                    if amt > 0:
-                                        if tgt == dummy:
-                                            global_results.append({
-                                                'PNM': p['name'], 'Team': 'NO MATCH', 
-                                                'Cost': None, 'Reason': 'Conflict/Capacity'
-                                            })
-                                        else:
-                                            info = pair_lookup.get((p['node'], tgt))
-                                            if info:
-                                                global_results.append({
-                                                    'PNM': p['name'], 'Team': info['team_members'], 
-                                                    'Cost': round(info['cost'], 4), 'Reason': info['reasons']
-                                                })
-                                                assign_map_flow[info['t_idx']].append({'p_id': p['id'], 'p_name': p['name'], 'p_attrs': p['attrs']})
-                                                matched = True
-                            if not matched: 
-                                global_results.append({'PNM': p['name'], 'Team': 'ERROR', 'Cost': None, 'Reason': 'Flow Error'})
-                    except: st.error(f"Party {party} Global Flow Failed")
-
-                    # A2. Greedy
-                    potential_pairs.sort(key=lambda x: x['cost'])
-                    matched_pnm_ids = set()
-                    team_counts = {t['t_idx']: 0 for t in team_nodes}
-                    
-                    # 1. Matched Loop
-                    for pair in potential_pairs:
-                        if pair['p_id'] not in matched_pnm_ids:
-                            if team_counts[pair['t_idx']] < num_pnm_matches_needed:
-                                matched_pnm_ids.add(pair['p_id'])
-                                team_counts[pair['t_idx']] += 1
-                                global_greedy.append({
-                                    'PNM': pair['p_name'], 'Team': pair['team_members'], 
-                                    'Cost': round(pair['cost'], 4), 'Reason': pair['reasons']
+                        # Calculate Potential Pairs
+                        potential_pairs = []
+                        for p_data in pnm_list:
+                            for t_data in team_list:
+                                if any((m, p_data['name']) in no_match_pairs for m in t_data['members']): continue
+                                
+                                score = 0
+                                reasons_list = []
+                                for m_id, m_name in zip(t_data['member_ids'], t_data['members']):
+                                    if m_id:
+                                        shared = p_data['attrs'].intersection(member_attr_cache.get(m_id, set()))
+                                        if shared:
+                                            for trait in shared: score += trait_weights.get(trait, 1.0)
+                                            reasons_list.append(f"{p_data['name']} + {m_name} ({', '.join(shared)})")
+                                
+                                final_cost = 1 / (1 + score + t_data['bonus'] + p_data['bonus'])
+                                potential_pairs.append({
+                                    'p_id': p_data['id'], 'p_name': p_data['name'], 'p_attrs': p_data['attrs'],
+                                    't_idx': t_data['t_idx'], 'team_size': t_data['team_size'],
+                                    'p_node': p_data['node_id'], 't_node': t_data['node_id'],
+                                    'cost': final_cost, 'pnm_rank': p_data['rank'],
+                                    'team_members': t_data['joined_names'], 'reasons': "; ".join(reasons_list)
                                 })
-                                assign_map_greedy[pair['t_idx']].append(pair)
-                    
-                    # 2. Unmatched Loop (The previously missing piece)
-                    for p in pnm_nodes:
-                        if p['id'] not in matched_pnm_ids:
-                            global_greedy.append({
-                                'PNM': p['name'], 'Team': 'NO MATCH', 
-                                'Cost': None, 'Reason': 'No Match (Greedy/Capacity)'
+                        
+                        potential_pairs.sort(key=lambda x: (x['cost'], -x['pnm_rank']))
+
+                        # --- PHASE A: GLOBAL FLOW ---
+                        G = nx.DiGraph()
+                        source, sink, no_match_node = 'source', 'sink', 'dummy_nomatch'
+                        total_flow = len(pnm_list)
+                        
+                        G.add_node(source, demand=-total_flow)
+                        G.add_node(sink, demand=total_flow)
+                        G.add_edge(no_match_node, sink, capacity=total_flow, weight=0)
+                        
+                        for p in pnm_list:
+                            G.add_edge(source, p['node_id'], capacity=1, weight=0)
+                            G.add_edge(p['node_id'], no_match_node, capacity=1, weight=1000000)
+                        for t in team_list:
+                            G.add_edge(t['node_id'], sink, capacity=num_pnm_matches_needed, weight=0)
+                        for pair in potential_pairs:
+                            G.add_edge(pair['p_node'], pair['t_node'], capacity=1, weight=int(pair['cost'] * 10000))
+                        
+                        global_flow_results = []
+                        assignments_map_flow = {t['t_idx']: [] for t in team_list}
+                        
+                        try:
+                            flow_dict = nx.min_cost_flow(G)
+                            pair_lookup = {(p['p_node'], p['t_node']): p for p in potential_pairs}
+                            pnm_ids_with_potential = {p['p_id'] for p in potential_pairs}
+                            
+                            for p_data in pnm_list:
+                                p_node = p_data['node_id']
+                                if p_node in flow_dict:
+                                    for t_node, flow in flow_dict[p_node].items():
+                                        if flow > 0:
+                                            if t_node == no_match_node:
+                                                reason = "Conflict List" if p_data['id'] not in pnm_ids_with_potential else "Capacity Full"
+                                                global_flow_results.append({
+                                                    'PNM ID': p_data['id'], 'PNM Name': p_data['name'],
+                                                    'Bump Team Members': "NO MATCH", 'Match Cost': None, 'Reason': reason
+                                                })
+                                            else:
+                                                match_info = pair_lookup.get((p_node, t_node))
+                                                if match_info:
+                                                    global_flow_results.append({
+                                                        'PNM ID': p_data['id'], 'PNM Name': p_data['name'],
+                                                        'Bump Team Members': match_info['team_members'],
+                                                        'Match Cost': round(match_info['cost'], 4), 'Reason': match_info['reasons']
+                                                    })
+                                                    assignments_map_flow[match_info['t_idx']].append(match_info)
+                        except nx.NetworkXUnfeasible:
+                            st.error(f"Optimization failed for Party {party}")
+
+                        # --- PHASE A2: GLOBAL GREEDY ---
+                        global_greedy_results = []
+                        assignments_map_greedy = {t['t_idx']: [] for t in team_list}
+                        matched_pnm_ids = set()
+                        team_counts = {t['t_idx']: 0 for t in team_list}
+
+                        for pair in potential_pairs:
+                            if pair['p_id'] not in matched_pnm_ids:
+                                if team_counts[pair['t_idx']] < num_pnm_matches_needed:
+                                    matched_pnm_ids.add(pair['p_id'])
+                                    team_counts[pair['t_idx']] += 1
+                                    global_greedy_results.append({
+                                        'PNM ID': pair['p_id'], 'PNM Name': pair['p_name'],
+                                        'Bump Team Members': pair['team_members'], 'Match Cost': round(pair['cost'], 4),
+                                        'Reason': pair['reasons']
+                                    })
+                                    assignments_map_greedy[pair['t_idx']].append(pair)
+                        
+                        for p_data in pnm_list:
+                            if p_data['id'] not in matched_pnm_ids:
+                                global_greedy_results.append({
+                                    'PNM ID': p_data['id'], 'PNM Name': p_data['name'],
+                                    'Bump Team Members': "NO MATCH", 'Match Cost': None, 'Reason': "No match (Greedy/Capacity)"
+                                })
+
+                        # --- PHASE B: INTERNAL ROTATIONS ---
+                        internal_flow_results = run_internal_rotation(assignments_map_flow, team_list, method='flow')
+                        internal_greedy_results = run_internal_rotation(assignments_map_greedy, team_list, method='greedy')
+
+                        # --- PHASE C: BUMP INSTRUCTIONS ---
+                        bump_instruct_flow = generate_bump_instructions(internal_flow_results)
+                        bump_instruct_greedy = generate_bump_instructions(internal_greedy_results)
+
+                        # --- EXPORT TO EXCEL ---
+                        output = io.BytesIO()
+                        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                            # 1. Summary
+                            df_glob_flow = pd.DataFrame(global_flow_results)
+                            df_glob_greedy = pd.DataFrame(global_greedy_results)
+                            
+                            flow_costs = df_glob_flow['Match Cost'].dropna()
+                            greedy_costs = df_glob_greedy['Match Cost'].dropna()
+                            summary_df = pd.DataFrame({
+                                'Metric': ['Total Matching Cost', 'Avg Cost', 'Min Cost', 'Max Cost', 'Standard Deviation'],
+                                'Global Flow': [
+                                    flow_costs.sum(), flow_costs.mean(), flow_costs.min(), flow_costs.max(),
+                                    flow_costs.std() if len(flow_costs) > 1 else 0.0
+                                ],
+                                'Global Greedy': [
+                                    greedy_costs.sum(), greedy_costs.mean(), greedy_costs.min(), greedy_costs.max(),
+                                    greedy_costs.std() if len(greedy_costs) > 1 else 0.0
+                                ]
                             })
-                    
-                    # B. Internal
-                    actual_rounds = 1 if bump_order_set == 'yes' else num_rounds_party
-                    rot_results = run_internal_rotation(assign_map_flow, team_nodes, 'flow', actual_rounds)
-                    rot_greedy = run_internal_rotation(assign_map_greedy, team_nodes, 'greedy', actual_rounds)
-                    bump_inst = gen_instructions(rot_results)
-                    bump_inst_greedy = gen_instructions(rot_greedy)
-                    
-                    # C. Export
-                    out = io.BytesIO()
-                    with pd.ExcelWriter(out, engine='xlsxwriter') as writer:
-                        # Summary
-                        df_gf = pd.DataFrame(global_results)
-                        df_gg = pd.DataFrame(global_greedy)
-                        
-                        # Fix for KeyError: Ensure Cost Column Exists
-                        if 'Cost' not in df_gf.columns: df_gf['Cost'] = np.nan
-                        if 'Cost' not in df_gg.columns: df_gg['Cost'] = np.nan
+                            summary_df.to_excel(writer, sheet_name="Summary", index=False)
+                            auto_adjust_columns(writer, "Summary", summary_df)
 
-                        flow_costs = pd.to_numeric(df_gf['Cost'], errors='coerce').dropna()
-                        greedy_costs = pd.to_numeric(df_gg['Cost'], errors='coerce').dropna()
-                        
-                        summary_df = pd.DataFrame({
-                            'Metric': ['Total Cost', 'Avg Cost', 'Min Cost', 'Max Cost'],
-                            'Global Flow': [flow_costs.sum(), flow_costs.mean(), flow_costs.min(), flow_costs.max()],
-                            'Global Greedy': [greedy_costs.sum(), greedy_costs.mean(), greedy_costs.min(), greedy_costs.max()]
+                            # 2. Global Results
+                            df_glob_flow.to_excel(writer, sheet_name="Global_Matches_Flow", index=False)
+                            auto_adjust_columns(writer, "Global_Matches_Flow", df_glob_flow)
+                            
+                            df_glob_greedy.to_excel(writer, sheet_name="Global_Matches_Greedy", index=False)
+                            auto_adjust_columns(writer, "Global_Matches_Greedy", df_glob_greedy)
+
+                            # 3. Rotations & Bump
+                            df_rot_flow = pd.DataFrame(internal_flow_results)
+                            df_rot_greedy = pd.DataFrame(internal_greedy_results)
+                            
+                            if 'Team ID' in df_rot_flow.columns: df_rot_flow = df_rot_flow.drop(columns=['Team ID'])
+                            if 'Team ID' in df_rot_greedy.columns: df_rot_greedy = df_rot_greedy.drop(columns=['Team ID'])
+
+                            df_bump_flow = pd.DataFrame(bump_instruct_flow)
+                            df_bump_greedy = pd.DataFrame(bump_instruct_greedy)
+
+                            if not df_rot_flow.empty:
+                                sheet_name = "Round_1_Flow" if bump_order_set == 'yes' else "Rotation_Flow"
+                                df_to_write = df_rot_flow.copy()
+                                if bump_order_set == 'yes' and 'Round' in df_to_write.columns:
+                                    df_to_write = df_to_write.drop(columns=['Round'])
+
+                                df_to_write.to_excel(writer, sheet_name=sheet_name, index=False)
+                                auto_adjust_columns(writer, sheet_name, df_to_write)
+                                
+                                if not df_bump_flow.empty and bump_order_set == 'no':
+                                     df_bump_flow.to_excel(writer, sheet_name="Bump_Logistics_Flow", index=False)
+                                     auto_adjust_columns(writer, "Bump_Logistics_Flow", df_bump_flow)
+
+                            if not df_rot_greedy.empty:
+                                sheet_name = "Round_1_Greedy" if bump_order_set == 'yes' else "Rotation_Greedy"
+                                df_to_write = df_rot_greedy.copy()
+                                if bump_order_set == 'yes' and 'Round' in df_to_write.columns:
+                                    df_to_write = df_to_write.drop(columns=['Round'])
+
+                                df_to_write.to_excel(writer, sheet_name=sheet_name, index=False)
+                                auto_adjust_columns(writer, sheet_name, df_to_write)
+
+                                if not df_bump_greedy.empty and bump_order_set == 'no':
+                                     df_bump_greedy.to_excel(writer, sheet_name="Bump_Logistics_Greedy", index=False)
+                                     auto_adjust_columns(writer, "Bump_Logistics_Greedy", df_bump_greedy)
+
+                        results_buffers.append({
+                            "party": party,
+                            "buffer": output.getvalue()
                         })
-                        summary_df.to_excel(writer, sheet_name="Summary", index=False)
-                        auto_adjust_columns(writer, "Summary", summary_df)
                         
-                        df_gf.to_excel(writer, sheet_name="Global_Matches_Flow", index=False)
-                        auto_adjust_columns(writer, "Global_Matches_Flow", df_gf)
-                        df_gg.to_excel(writer, sheet_name="Global_Matches_Greedy", index=False)
-                        auto_adjust_columns(writer, "Global_Matches_Greedy", df_gg)
+                        progress_bar.progress(party / num_of_parties)
 
-                        pd.DataFrame(rot_results).to_excel(writer, sheet_name="Rotations_Flow", index=False)
-                        pd.DataFrame(rot_greedy).to_excel(writer, sheet_name="Rotations_Greedy", index=False)
-                        pd.DataFrame(bump_inst).to_excel(writer, sheet_name="Bump_Instructions_Flow", index=False)
-
-                    buffers.append({'party': party, 'data': out.getvalue()})
-                    prog.progress(party / num_of_parties)
-
+                # --- DOWNLOADS ---
                 st.success("Matching Complete!")
-                cols = st.columns(len(buffers))
-                for i, b in enumerate(buffers):
-                    with cols[i]:
-                        st.download_button(f"📥 Party {b['party']}", b['data'], f"Party_{b['party']}_Results.xlsx")
+                if not results_buffers:
+                    st.warning("No matches generated. Check inputs.")
+                    
+                for res in results_buffers:
+                    st.download_button(
+                        label=f"Download Results for Party {res['party']}",
+                        data=res['buffer'],
+                        file_name=f"Party_{res['party']}_Matches.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
