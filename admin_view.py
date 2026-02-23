@@ -25,21 +25,6 @@ SCOPES = [
 def load_model():
     return SentenceTransformer('all-MiniLM-L6-v2')
 
-@st.cache_data(ttl=3600)
-def load_geo_data():
-    """Loads and caches the US Cities database for offline geocoding."""
-    url = "https://raw.githubusercontent.com/kelvins/US-Cities-Database/main/csv/us_cities.csv"
-    try:
-        ref_df = pd.read_csv(url)
-        ref_df['MATCH_KEY'] = (ref_df['CITY'] + ", " + ref_df['STATE_CODE']).str.upper()
-        ref_df = ref_df.drop_duplicates(subset=['MATCH_KEY'], keep='first')
-        return {
-            key: [lat, lon]
-            for key, lat, lon in zip(ref_df['MATCH_KEY'], ref_df['LATITUDE'], ref_df['LONGITUDE'])
-        }, list(ref_df['MATCH_KEY'])
-    except:
-        return {}, []
-
 # --- HELPERS ---
 def get_gc():
     creds_dict = dict(st.secrets["gcp_service_account"])
@@ -52,7 +37,11 @@ def get_data(worksheet_name):
         sheet = gc.open(SHEET_NAME).worksheet(worksheet_name)
         data = sheet.get_all_values()
         if not data: return pd.DataFrame()
+        
+        # Create DF
         df = pd.DataFrame(data[1:], columns=data[0])
+        
+        # Basic cleanup: Strip whitespace from column headers
         df.columns = df.columns.str.strip()
         return df
     except Exception as e:
@@ -65,7 +54,8 @@ def get_setting_value(cell):
         gc = get_gc()
         sheet = gc.open(SHEET_NAME).worksheet("Settings")
         return sheet.acell(cell).value
-    except: return None
+    except:
+        return None
 
 def update_settings(cell, value):
     try:
@@ -86,23 +76,38 @@ def update_roster(names_list):
     except: return False
 
 def get_active_roster_names():
+    """
+    Returns the list of active members.
+    Priority:
+    1. 'Settings' sheet Column D (Populated via CSV Upload or Sync).
+    2. Fallback to 'Member Information' sheet if Settings is empty.
+    """
+    # 1. Try getting from Settings (The "Uploaded/Synced" Roster)
     try:
         gc = get_gc()
         sheet = gc.open(SHEET_NAME).worksheet("Settings")
+        # Assuming D2:D contains the list
         roster_data = sheet.get_values("D2:D")
         names = [r[0].strip() for r in roster_data if r and r[0].strip()]
-        if names: return names
-    except: pass
+        if names:
+            return names
+    except Exception:
+        pass
 
+    # 2. Fallback to Member Information Sheet
     df_mem = get_data("Member Information")
     if not df_mem.empty:
+        # Attempt to find the Name column dynamically
         possible_cols = ["Full Name", "Name", "Member Name", "Member"]
         found_col = None
         for col in df_mem.columns:
             if any(c.lower() in col.lower() for c in possible_cols):
                 found_col = col
                 break
-        if found_col: return df_mem[found_col].dropna().astype(str).str.strip().tolist()
+        
+        if found_col:
+            return df_mem[found_col].dropna().astype(str).str.strip().tolist()
+    
     return []
 
 def update_team_ranking(team_id, new_ranking):
@@ -114,8 +119,11 @@ def update_team_ranking(team_id, new_ranking):
             sheet.update_cell(cell.row, 6, new_ranking)
             return True
         return False
-    except: return False
+    except Exception as e:
+        st.error(f"Error updating team ranking: {e}")
+        return False
 
+# --- BATCH UPDATE FUNCTIONS ---
 def batch_update_pnm_rankings(rankings_map):
     try:
         gc = get_gc()
@@ -152,7 +160,6 @@ def batch_update_team_rankings(rankings_map):
         all_values = sheet.get_all_values()
         if not all_values: return 0
         headers = [h.lower().strip() for h in all_values[0]]
-        
         try: id_idx = next(i for i, h in enumerate(headers) if 'team id' in h or 'id' == h)
         except: id_idx = 4
         try: rank_idx = next(i for i, h in enumerate(headers) if 'ranking' in h or 'rank' in h)
@@ -179,6 +186,7 @@ def auto_adjust_columns(writer, sheet_name, df):
         max_len = max(df[col].astype(str).map(len).max(), len(str(col))) + 2
         worksheet.set_column(idx, idx, max_len)
 
+# --- SMART COLUMN MAPPING HELPER ---
 def standardize_columns(df, entity_type='pnm'):
     df.columns = df.columns.str.strip()
     mappings = {
@@ -192,7 +200,6 @@ def standardize_columns(df, entity_type='pnm'):
         'High School Involvement': ['high school', 'hs involvement'],
         'ID': ['id', 'pnm id', 'member id', 'sorority id']
     }
-    
     new_cols = {}
     used_cols = set()
     for canonical, possibilities in mappings.items():
@@ -409,18 +416,27 @@ else:
             st.dataframe(df_teams.drop(columns=['display_label'], errors='ignore'), use_container_width=True)
         else: st.info("No bump teams found yet.")
 
-    # --- TAB 5 & 6: EXCUSES & CONNECTIONS ---
+    # --- TAB 5: VIEW EXCUSES ---
     with tab5:
+        st.header("Member Party Excuses")
         if st.button("🔄 Refresh Excuses"): st.rerun()
-        df_ex = get_data("Party Excuses")
-        st.dataframe(df_ex, use_container_width=True) if not df_ex.empty else st.info("No excuses found.")
+        df_excuses = get_data("Party Excuses")
+        if not df_excuses.empty:
+            st.dataframe(df_excuses, use_container_width=True)
+        else:
+            st.info("No excuses found.")
+
+    # --- TAB 6: VIEW PRIOR CONNECTIONS ---
     with tab6:
         st.header("Prior PNM Connections Log")
         if st.button("🔄 Refresh Connections"): st.rerun()
-        df_conn = get_data("Prior Connections")
-        st.dataframe(df_conn, use_container_width=True) if not df_conn.empty else st.info("No prior connections found.")
+        df_connections = get_data("Prior Connections")
+        if not df_connections.empty:
+            st.dataframe(df_connections, use_container_width=True)
+        else:
+            st.info("No prior connections found.")
 
-    # --- TAB 7: RUN MATCHING (MODIFIED) ---
+    # --- TAB 7: RUN MATCHING ---
     with tab7:
         st.subheader("Matching Configuration")
         c1, c2 = st.columns(2)
@@ -470,7 +486,16 @@ else:
                 pnm_working['Party'] = party_assignments
 
                 # 5. GEOCODING & CLUSTERING (OFFLINE)
-                city_coords_map, ALL_CITY_KEYS = load_geo_data()
+                url_geo = "https://raw.githubusercontent.com/kelvins/US-Cities-Database/main/csv/us_cities.csv"
+                try:
+                    ref_df = pd.read_csv(url_geo)
+                    ref_df['MATCH_KEY'] = (ref_df['CITY'] + ", " + ref_df['STATE_CODE']).str.upper()
+                    ref_df = ref_df.drop_duplicates(subset=['MATCH_KEY'], keep='first')
+                    city_coords_map = {key: [lat, lon] for key, lat, lon in zip(ref_df['MATCH_KEY'], ref_df['LATITUDE'], ref_df['LONGITUDE'])}
+                    ALL_CITY_KEYS = list(city_coords_map.keys())
+                except:
+                    city_coords_map = {}
+                    ALL_CITY_KEYS = []
 
                 def get_coords(hometown):
                     if not isinstance(hometown, str): return None
