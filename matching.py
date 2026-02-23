@@ -371,50 +371,38 @@ if st.button("Run Matching Algorithm"):
         # 2. MATCHING LOGIC SETUP
         
         # --- PARSE EXCUSES ---
-        # Format in Sheet: Member ID, Excused Party
-        party_excused_set = set()
-        if 'Member ID' in party_excuses.columns and 'Excused Party' in party_excuses.columns:
-            for _, row in party_excuses.iterrows():
-                try:
-                    # Handle comma separated excuses if formatted that way
-                    raw_party = str(row['Excused Party'])
-                    excuses = [int(x) for x in re.findall(r'\d+', raw_party)]
-                    for ex in excuses:
-                        party_excused_set.add((row['Member ID'], ex))
-                except:
-                    pass
-        
-        # --- PARSE NO MATCH ---
-        no_match_pairs = set()
-        if 'Member ID' in member_pnm_no_match.columns and 'PNM ID' in member_pnm_no_match.columns:
-            for _, row in member_pnm_no_match.iterrows():
-                if pd.notna(row['Member ID']) and pd.notna(row['PNM ID']):
-                    no_match_pairs.add((row['Member ID'], row['PNM ID']))
+        party_excuses["Choose the party/parties you are unable to attend:"] = party_excuses["Choose the party/parties you are unable to attend:"].apply(
+            lambda x: [int(i) for i in re.findall(r'\d+', str(x))] if pd.notnull(x) else []
+        )
+        party_excuses_exploded = party_excuses.explode("Choose the party/parties you are unable to attend:")
 
+        member_pnm_no_match["Choose the PNM or PNMs you should NOT match with:"] = member_pnm_no_match["Choose the PNM or PNMs you should NOT match with:"].str.split(r',\s*', regex=True)
+        no_match_exploded = member_pnm_no_match.explode("Choose the PNM or PNMs you should NOT match with:")
+        
         member_attr_cache = {
-            row.get('Sorority ID'): set(str(row.get('attributes_for_matching', '')).split(', '))
+            row['Sorority ID']: set(str(row.get('attributes_for_matching', '')).split(', '))
             if row.get('attributes_for_matching') else set()
-            for _, row in member_interest.iterrows()
+            for row in member_interest.to_dict('records')
         }
-        
-        # Map Name to ID
-        name_to_id_map = {}
-        for _, row in member_interest.iterrows():
-            if 'Full Name' in row:
-                name_to_id_map[row['Full Name']] = row.get('Sorority ID')
-
+        name_to_id_map = member_interest.set_index('Full Name')['Sorority ID'].to_dict()
         all_member_traits = member_interest['attributes_for_matching'].str.split(', ').explode()
         trait_freq = all_member_traits.value_counts()
         trait_weights = (len(member_interest) / trait_freq).to_dict()
         strength_bonus_map = {1: 1.5, 2: 1.0, 3: 0.5, 4: 0.0}
+        
+        no_match_pairs = {
+            (row["Choose your name:"], row["Choose the PNM or PNMs you should NOT match with:"])
+            for row in no_match_exploded.to_dict('records')
+        }
 
     # --- EXECUTION LOOP ---
     st.write("---")
     st.write("### Results")
     progress_bar = st.progress(0)
+    
     results_buffers = []
 
-    # --- DEFINE INTERNAL ROTATION LOGIC ---
+    # --- DEFINE INTERNAL ROTATION LOGIC (NESTED TO ACCESS CACHES) ---
     def run_internal_rotation(assignment_map, team_list, method='flow'):
         rotation_output = []
         actual_rounds = 1 if bump_order_set == 'yes' else num_rounds_party
@@ -423,8 +411,9 @@ if st.button("Run Matching Algorithm"):
             if not assigned_pnms: continue
             team_data = next((t for t in team_list if t['t_idx'] == t_idx), None)
             if not team_data: continue
-            
-            team_rgl_name = str(team_data['row_data'].get('Bump Group Leader', '')).strip()
+
+            raw_rgl = team_data['row_data'].get('Choose your Bump Group Leader (RGL). Leave blank if none.', '')
+            team_rgl_name = "" if pd.isna(raw_rgl) or str(raw_rgl).lower() == 'nan' else str(raw_rgl).strip()
 
             valid_members = []
             for m_id, m_name in zip(team_data['member_ids'], team_data['members']):
@@ -472,10 +461,7 @@ if st.button("Run Matching Algorithm"):
                             if p_node in sub_flow:
                                 for tgt, flow in sub_flow[p_node].items():
                                     if flow > 0 and tgt != sub_t:
-                                        m_id_ex = tgt.replace("m_", "") 
-                                        try: m_id_ex = int(m_id_ex) 
-                                        except: pass
-                                        
+                                        m_id_ex = int(tgt.replace("m_", ""))
                                         m_name = next((m['name'] for m in valid_members if m['id'] == m_id_ex), "Unknown")
                                         edge_d = sub_G.get_edge_data(p_node, tgt)
                                         raw_weight = edge_d.get('weight', 10000)
@@ -559,46 +545,29 @@ if st.button("Run Matching Algorithm"):
             pnm_list = []
             for i, row in enumerate(pnms_df.to_dict('records')):
                 p_attrs = set(str(row['attributes_for_matching']).split(', '))
-                # Use 'Average Recruit Rank' from the Sheet
                 p_rank = row.get("Average Recruit Rank", 1.0)
-                if pd.isna(p_rank): p_rank = 1.0
-                
                 pnm_list.append({
-                    'idx': i, 'id': row.get('PNM ID', i), 'name': row['Full Name'],
+                    'idx': i, 'id': row['PNM ID'], 'name': row['Enter your name:'],
                     'attrs': p_attrs, 'rank': p_rank, 'bonus': 0.75 * (p_rank - 1),
                     'node_id': f"p_{i}"
                 })
+
+            party_excused_names = set(party_excuses_exploded[party_excuses_exploded["Choose the party/parties you are unable to attend:"] == party]["Choose your name:"])
             
             team_list = []
             for raw_idx, row in enumerate(bump_teams.to_dict('records')):
-                # Gather members from columns 'Member 1' to 'Member 4'
-                current_members = []
-                current_member_ids = []
+                submitter = row["Choose your name:"]
+                partners_str = str(row.get("Choose the name(s) of your bump partner(s):", ""))
+                partners = [p.strip() for p in re.split(r'[,;]\s*', partners_str) if p.strip()] if partners_str.lower() != 'nan' else []
+                current_members = [submitter] + partners
                 
-                for k in ['Member 1', 'Member 2', 'Member 3', 'Member 4']:
-                    m_name = row.get(k)
-                    if pd.notna(m_name) and str(m_name).strip():
-                        current_members.append(str(m_name).strip())
-                        # Look up ID
-                        m_id = name_to_id_map.get(str(m_name).strip())
-                        current_member_ids.append(m_id)
-
-                # Check excuses
-                is_excused = False
-                for m_id in current_member_ids:
-                    if m_id and (m_id, party) in party_excused_set:
-                        is_excused = True
-                        break
+                if any(m in party_excused_names for m in current_members):
+                    continue 
                 
-                if is_excused or not current_members:
-                    continue
-                
-                # Check column 'Rank' from Bump Teams sheet
-                t_rank = row.get("Rank", 4)
-                
+                t_rank = row.get("Bump Team Ranking:", 4)
                 team_list.append({
                     't_idx': len(team_list), 'members': current_members, 'team_size': len(current_members),
-                    'member_ids': current_member_ids,
+                    'member_ids': [name_to_id_map.get(m) for m in current_members],
                     'joined_names': ", ".join(current_members),
                     'bonus': strength_bonus_map.get(t_rank, 0.0),
                     'node_id': f"t_{len(team_list)}", 'row_data': row
@@ -608,9 +577,7 @@ if st.button("Run Matching Algorithm"):
             potential_pairs = []
             for p_data in pnm_list:
                 for t_data in team_list:
-                    # Check No Match pairs
-                    if any((m_id, p_data['id']) in no_match_pairs for m_id in t_data['member_ids'] if m_id): 
-                        continue
+                    if any((m, p_data['name']) in no_match_pairs for m in t_data['members']): continue
                     
                     score = 0
                     reasons_list = []
@@ -799,3 +766,4 @@ if st.button("Run Matching Algorithm"):
             file_name=f"Party_{res['party']}_Matches.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
