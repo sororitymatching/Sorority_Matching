@@ -46,18 +46,53 @@ def get_gc():
     return gspread.service_account_from_dict(creds_dict, scopes=SCOPES)
 
 def get_data(worksheet_name):
-    """Gets all data and standardizes headers slightly."""
+    """
+    Robustly attempts to find a worksheet.
+    1. Tries exact match.
+    2. Tries case-insensitive/stripped match.
+    3. If searching for 'PNM Information', looks for any tab with 'PNM' and 'Info'.
+    """
     try:
         gc = get_gc()
-        sheet = gc.open(SHEET_NAME).worksheet(worksheet_name)
-        data = sheet.get_all_values()
+        sh = gc.open(SHEET_NAME)
+    except Exception as e:
+        st.error(f"Could not open Google Sheet '{SHEET_NAME}'. Error: {e}")
+        return pd.DataFrame()
+
+    found_sheet = None
+    
+    # 1. Try Exact Match
+    try:
+        found_sheet = sh.worksheet(worksheet_name)
+    except gspread.WorksheetNotFound:
+        # 2. Try Fuzzy Match (Ignore case/spaces)
+        all_sheets = sh.worksheets()
+        for ws in all_sheets:
+            if ws.title.strip().lower() == worksheet_name.strip().lower():
+                found_sheet = ws
+                break
+        
+        # 3. Special Fallback for PNM Information
+        if not found_sheet and "PNM" in worksheet_name:
+            for ws in all_sheets:
+                if "pnm" in ws.title.lower() and "info" in ws.title.lower():
+                    found_sheet = ws
+                    break
+        
+        if not found_sheet:
+            # Only show error if it's the critical PNM sheet, otherwise just return empty (e.g. for optional sheets)
+            if "PNM" in worksheet_name:
+                st.error(f"❌ Could not find tab '{worksheet_name}'. Found these tabs: {[w.title for w in all_sheets]}")
+            return pd.DataFrame()
+
+    try:
+        data = found_sheet.get_all_values()
         if not data: return pd.DataFrame()
         df = pd.DataFrame(data[1:], columns=data[0])
         df.columns = df.columns.str.strip()
         return df
     except Exception as e:
-        if worksheet_name == "PNM Information":
-             st.warning("Could not find 'PNM Information' tab.")
+        st.error(f"Error reading data from '{found_sheet.title}': {e}")
         return pd.DataFrame()
 
 def get_setting_value(cell):
