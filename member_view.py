@@ -420,7 +420,7 @@ with tab4:
                                 rank_default = 0.0
 
             with st.form(key=f"rank_form"):
-                score = st.number_input("Score (0-5):", min_value=0.0, max_value=5.0, step=0.1, value=rank_default)
+                score = st.number_input("Score:", min_value=0.0, step=0.1, value=rank_default)
                 submit_rank = st.form_submit_button("Submit Ranking")
 
             if submit_rank:
