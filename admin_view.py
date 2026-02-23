@@ -577,35 +577,75 @@ else:
                     
                     df['attributes_for_matching'] = df[id_col].map(lambda x: ", ".join(final_attrs.get(x, set())))
 
-                # 6. MATCHING DATA PREP
-                # Handle Party Excuses
-                excuse_col = next((c for c in party_excuses.columns if "party" in c.lower() and "attend" in c.lower()), None)
-                party_excuses_exploded = pd.DataFrame(columns=['Choose your name:', 'Party'])
+                # --- 6. MATCHING DATA PREP (ALIGNED WITH STREAMLIT_APP LOGIC) ---
                 
-                if excuse_col and not party_excuses.empty: 
-                    # Try to find name column in excuses
-                    ex_name_col = next((c for c in party_excuses.columns if "name" in c.lower()), party_excuses.columns[1])
-                    temp_excuses = party_excuses.copy()
-                    temp_excuses[excuse_col] = temp_excuses[excuse_col].apply(lambda x: [int(i) for i in re.findall(r'\d+', str(x))] if pd.notnull(x) else [])
-                    party_excuses_exploded = temp_excuses.explode(excuse_col).rename(columns={ex_name_col: "Choose your name:", excuse_col: "Party"})
+                # Ensure Name Columns match expected format for internal logic
+                # (Standardize_columns above already ensures 'Full Name' exists, but we ensure consistency here)
+                if 'Full Name' not in member_interest.columns and 'First Name' in member_interest.columns:
+                    member_interest["Full Name"] = member_interest["First Name"] + " " + member_interest["Last Name"]
+                
+                # PNM Working is standardized to 'Full Name' above, but map to 'Enter your name:' for compatibility if needed
+                if 'Enter your name:' not in pnm_working.columns:
+                    pnm_working["Enter your name:"] = pnm_working['Full Name']
 
-                # Handle No Match
+                # Handle Party Excuses: Extract integers from string list and explode
+                # Logic: Converts "[1, 2]" into actual list objects then creates a row per party
+                if "Choose the party/parties you are unable to attend:" in party_excuses.columns:
+                    party_excuses["Choose the party/parties you are unable to attend:"] = party_excuses["Choose the party/parties you are unable to attend:"].apply(
+                        lambda x: [int(i) for i in re.findall(r'\d+', str(x))] if pd.notnull(x) else []
+                    )
+                    party_excuses_exploded = party_excuses.explode("Choose the party/parties you are unable to attend:")
+                else:
+                    # Fallback if specific column name missing in Admin View
+                    excuse_col = next((c for c in party_excuses.columns if "party" in c.lower()), None)
+                    if excuse_col:
+                        party_excuses["Choose the party/parties you are unable to attend:"] = party_excuses[excuse_col].apply(
+                            lambda x: [int(i) for i in re.findall(r'\d+', str(x))] if pd.notnull(x) else []
+                        )
+                        party_excuses_exploded = party_excuses.explode("Choose the party/parties you are unable to attend:")
+                    else:
+                        party_excuses_exploded = pd.DataFrame()
+
+                # Handle No Match: Split comma-separated PNM names and explode
+                nm_col = "Choose the PNM or PNMs you should NOT match with:"
+                if nm_col not in member_pnm_no_match.columns:
+                     # Attempt to find it if exact name doesn't exist (Admin robustness)
+                     nm_col = next((c for c in member_pnm_no_match.columns if "match" in c.lower() and "not" in c.lower()), nm_col)
+                
+                if nm_col in member_pnm_no_match.columns:
+                    member_pnm_no_match[nm_col] = member_pnm_no_match[nm_col].str.split(r',\s*', regex=True)
+                    no_match_exploded = member_pnm_no_match.explode(nm_col)
+                else:
+                    no_match_exploded = pd.DataFrame()
+                
+                # Build No-Match Pair Set for fast lookup during iteration
+                # We map the admin column 'Full Name' (or found Creator col) to 'Choose your name:' for compatibility
+                nm_name_col = next((c for c in no_match_exploded.columns if "name" in c.lower() and "pnm" not in c.lower()), "Choose your name:")
+                
                 no_match_pairs = set()
-                if not member_pnm_no_match.empty:
-                    m_c = next((c for c in member_pnm_no_match.columns if 'member' in c.lower() and 'name' in c.lower()), None)
-                    p_c = next((c for c in member_pnm_no_match.columns if 'pnm' in c.lower() and 'name' in c.lower()), None)
-                    if m_c and p_c:
-                         # Handle comma separated PNMs in no_match
-                        member_pnm_no_match[p_c] = member_pnm_no_match[p_c].str.split(r',\s*', regex=True)
-                        exploded_nm = member_pnm_no_match.explode(p_c)
-                        no_match_pairs = {(r[m_c], r[p_c]) for r in exploded_nm.to_dict('records') if pd.notna(r.get(m_c)) and pd.notna(r.get(p_c))}
+                if not no_match_exploded.empty:
+                    no_match_pairs = {
+                        (row[nm_name_col], row[nm_col])
+                        for row in no_match_exploded.to_dict('records')
+                        if pd.notna(row.get(nm_name_col)) and pd.notna(row.get(nm_col))
+                    }
 
-                # Caches and Weights
-                member_attr_cache = {r['Sorority ID']: set(str(r.get('attributes_for_matching', '')).split(', ')) for r in member_interest.to_dict('records')}
-                name_to_id_map = {r['Full Name']: r['Sorority ID'] for i, r in member_interest.iterrows() if r.get('Full Name')}
-                
-                all_traits = member_interest['attributes_for_matching'].str.split(', ').explode()
-                trait_weights = (len(member_interest) / all_traits.value_counts()).to_dict()
+                # Build Attribute Cache: Map Sorority ID to a set of their matching attributes
+                member_attr_cache = {
+                    row['Sorority ID']: set(str(row.get('attributes_for_matching', '')).split(', '))
+                    if row.get('attributes_for_matching') else set()
+                    for row in member_interest.to_dict('records')
+                }
+
+                # Map names to IDs for internal rotation logic
+                name_to_id_map = member_interest.set_index('Full Name')['Sorority ID'].to_dict()
+
+                # Calculate Trait Weights based on inverse frequency across the chapter
+                all_member_traits = member_interest['attributes_for_matching'].str.split(', ').explode()
+                trait_freq = all_member_traits.value_counts()
+                trait_weights = (len(member_interest) / trait_freq).to_dict()
+
+                # Chapter-standard strength bonus mapping
                 strength_bonus_map = {1: 1.5, 2: 1.0, 3: 0.5, 4: 0.0}
 
                 # --- 7. INTERNAL ROTATION LOGIC ---
@@ -769,7 +809,9 @@ else:
                         party_excused_names = set()
                         if not party_excuses_exploded.empty:
                             mask = party_excuses_exploded["Party"].astype(str) == str(party)
-                            party_excused_names = set(party_excuses_exploded[mask]["Choose your name:"])
+                            # Handle variable column names for excuses in Admin View
+                            ex_name_col = next((c for c in party_excuses_exploded.columns if "name" in c.lower()), "Choose your name:")
+                            party_excused_names = set(party_excuses_exploded[mask][ex_name_col])
                         
                         team_list = []
                         for raw_idx, row in enumerate(bump_teams.to_dict('records')):
