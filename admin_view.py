@@ -380,7 +380,7 @@ def standardize_columns(df, entity_type='pnm'):
 
 st.set_page_config(page_title="Admin Dashboard", layout="wide")
 
-st.title("📊 Sorority Admin Dashboard")
+st.title("Sorority Admin Dashboard")
 
 
 
