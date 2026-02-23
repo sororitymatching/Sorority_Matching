@@ -123,7 +123,7 @@ def update_team_ranking(team_id, new_ranking):
         st.error(f"Error updating team ranking: {e}")
         return False
 
-# --- NEW BATCH UPDATE FUNCTION ---
+# --- NEW BATCH UPDATE FUNCTIONS ---
 def batch_update_pnm_rankings(rankings_map):
     """
     Updates PNM rankings in batch to avoid API limits and slowness.
@@ -175,6 +175,54 @@ def batch_update_pnm_rankings(rankings_map):
         sheet.update(values=all_values, range_name="A1")
         return updates_count
         
+    except Exception as e:
+        st.error(f"Batch update failed: {e}")
+        return 0
+
+def batch_update_team_rankings(rankings_map):
+    """
+    Updates Bump Team rankings in batch.
+    rankings_map: { 'team_id': new_rank }
+    """
+    try:
+        gc = get_gc()
+        sheet = gc.open(SHEET_NAME).worksheet("Bump Teams")
+        
+        all_values = sheet.get_all_values()
+        if not all_values: return 0
+        
+        headers = [h.lower().strip() for h in all_values[0]]
+        
+        # Find ID column
+        try:
+            id_idx = next(i for i, h in enumerate(headers) if 'team id' in h or 'id' == h)
+        except StopIteration:
+            # Fallback based on typical structure (Timestamp, Creator, Partners, RGL, ID, Ranking)
+            id_idx = 4
+            
+        # Find Ranking column
+        try:
+            rank_idx = next(i for i, h in enumerate(headers) if 'ranking' in h or 'rank' in h)
+        except StopIteration:
+            rank_idx = 5
+
+        updates_count = 0
+        
+        for i in range(1, len(all_values)):
+            row = all_values[i]
+            if len(row) <= id_idx: continue
+            
+            t_id = str(row[id_idx]).strip()
+            
+            if t_id in rankings_map:
+                # Ensure row is long enough
+                while len(row) <= rank_idx:
+                    row.append("")
+                row[rank_idx] = str(rankings_map[t_id])
+                updates_count += 1
+        
+        sheet.update(values=all_values, range_name="A1")
+        return updates_count
     except Exception as e:
         st.error(f"Batch update failed: {e}")
         return 0
@@ -391,14 +439,12 @@ else:
                     
                     if st.button("Sync Rankings to PNM Sheet"):
                         with st.spinner("Syncing..."):
-                            # 1. Create a map of updates {ID: Score}
                             rankings_map = {}
                             for idx, row in avg_df.iterrows():
                                 p_id = str(row[id_col]).strip()
                                 score = round(row['Calculated Average'], 2)
                                 rankings_map[p_id] = score
                             
-                            # 2. Batch Update
                             count = batch_update_pnm_rankings(rankings_map)
                             
                         st.success(f"✅ Auto-synced {count} PNM rankings!")
@@ -430,23 +476,30 @@ else:
     with tab4:
         st.header("Bump Team Management")
         df_teams = get_data("Bump Teams")
+        
         if not df_teams.empty:
+            # Smart col detection
             id_col = next((c for c in df_teams.columns if 'team id' in c.lower() or 'id' in c.lower()), df_teams.columns[4] if len(df_teams.columns)>4 else None)
             creator_col = next((c for c in df_teams.columns if 'creator' in c.lower()), df_teams.columns[1] if len(df_teams.columns)>1 else None)
             partners_col = next((c for c in df_teams.columns if 'partner' in c.lower()), df_teams.columns[2] if len(df_teams.columns)>2 else None)
-            
+            rank_col = next((c for c in df_teams.columns if 'rank' in c.lower()), None)
+
             if id_col and creator_col:
-                with st.expander("⭐ Assign/Update Team Rankings", expanded=True):
-                    df_teams['display_label'] = df_teams.apply(
-                        lambda x: f"Team {x[id_col]} | {x[creator_col]}, {x.get(partners_col, '')}", 
-                        axis=1
-                    )
+                df_teams['display_label'] = df_teams.apply(
+                    lambda x: f"Team {x[id_col]} | {x[creator_col]}, {x.get(partners_col, '')}", 
+                    axis=1
+                )
+                
+                # --- LAYOUT FOR UPDATES ---
+                tab_single, tab_bulk = st.tabs(["📝 Single Team Update", "📤 Bulk Upload CSV"])
+                
+                # 1. SINGLE UPDATE
+                with tab_single:
                     col_a, col_b, col_c = st.columns([3, 1, 1])
                     with col_a:
                         selected_label = st.selectbox("Select Team to Rank:", df_teams['display_label'].tolist())
                         selected_team_id = df_teams[df_teams['display_label'] == selected_label][id_col].values[0]
                     with col_b:
-                        rank_col = next((c for c in df_teams.columns if 'rank' in c.lower()), None)
                         if rank_col:
                             current_rank = df_teams[df_teams[id_col] == selected_team_id][rank_col].values[0]
                         else:
@@ -459,6 +512,61 @@ else:
                             if update_team_ranking(selected_team_id, new_rank):
                                 st.success(f"Rank {new_rank} assigned!")
                                 st.rerun() 
+                
+                # 2. BULK UPLOAD
+                with tab_bulk:
+                    st.info("Upload a CSV with columns: `Team ID` (or `Creator Name`) and `Ranking`.")
+                    team_csv = st.file_uploader("Upload Rankings CSV", type=["csv"], key="team_rank_upload")
+                    
+                    if team_csv:
+                        if st.button("Process Bulk Update"):
+                            try:
+                                df_bulk = pd.read_csv(team_csv)
+                                # Normalize headers
+                                df_bulk.columns = df_bulk.columns.str.strip().str.lower()
+                                
+                                # Find columns
+                                b_id_col = next((c for c in df_bulk.columns if 'id' in c), None)
+                                b_name_col = next((c for c in df_bulk.columns if 'name' in c or 'creator' in c), None)
+                                b_rank_col = next((c for c in df_bulk.columns if 'rank' in c), None)
+                                
+                                if not b_rank_col:
+                                    st.error("CSV must have a 'Ranking' column.")
+                                elif not (b_id_col or b_name_col):
+                                    st.error("CSV must have a 'Team ID' or 'Creator Name' column.")
+                                else:
+                                    # Prepare map {team_id: rank}
+                                    bulk_map = {}
+                                    
+                                    # Create lookup for names if ID is missing in CSV
+                                    name_to_id = {}
+                                    if not b_id_col and b_name_col:
+                                        # Map Creator Name -> Team ID from existing data
+                                        name_to_id = dict(zip(df_teams[creator_col].astype(str).str.strip().str.lower(), df_teams[id_col].astype(str)))
+                                    
+                                    for _, row in df_bulk.iterrows():
+                                        rank_val = row[b_rank_col]
+                                        t_id = None
+                                        
+                                        if b_id_col and pd.notna(row[b_id_col]):
+                                            t_id = str(int(row[b_id_col])) if str(row[b_id_col]).replace('.','').isdigit() else str(row[b_id_col])
+                                        elif b_name_col and pd.notna(row[b_name_col]):
+                                            name_key = str(row[b_name_col]).strip().lower()
+                                            t_id = name_to_id.get(name_key)
+                                            
+                                        if t_id:
+                                            bulk_map[t_id] = rank_val
+                                    
+                                    if bulk_map:
+                                        cnt = batch_update_team_rankings(bulk_map)
+                                        st.success(f"✅ Updated {cnt} teams!")
+                                        st.rerun()
+                                    else:
+                                        st.warning("No valid teams found to update.")
+                                        
+                            except Exception as e:
+                                st.error(f"Error processing CSV: {e}")
+
             st.divider()
             st.dataframe(df_teams.drop(columns=['display_label'], errors='ignore'), use_container_width=True)
         else:
@@ -697,6 +805,7 @@ else:
             st.write("---")
             st.write("### Results")
             progress_bar = st.progress(0)
+            
             results_buffers = []
 
             def run_internal_rotation(assignment_map, team_list, method='flow'):
