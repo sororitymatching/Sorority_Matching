@@ -574,6 +574,7 @@ else:
 
     # --- TAB 5: VIEW EXCUSES ---
     with tab5:
+        st.header("Member Party Excuses")
         if st.button("🔄 Refresh Excuses"): st.rerun()
         df_excuses = get_data("Party Excuses")
         if not df_excuses.empty:
