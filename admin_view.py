@@ -491,7 +491,7 @@ else:
                 )
                 
                 # --- LAYOUT FOR UPDATES ---
-                tab_single, tab_bulk = st.tabs(["📝 Single Team Update", "📤 Bulk Upload CSV"])
+                tab_single, tab_bulk = st.tabs(["Single Team Update", "Bulk Upload CSV"])
                 
                 # 1. SINGLE UPDATE
                 with tab_single:
