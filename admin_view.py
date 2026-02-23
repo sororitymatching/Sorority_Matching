@@ -615,38 +615,72 @@ else:
                     st.info(f"Processing {len(df_votes)} total votes across {len(avg_df)} unique PNMs...")
 
                     
-
                     if st.button("Sync Rankings to PNM Sheet"):
-
                         with st.spinner("Syncing..."):
+                            try:
+                                # 1. Open the target sheet ONCE
+                                gc = get_gc()
+                                sheet_target = gc.open(SHEET_NAME).worksheet("PNM Information")
+                                
+                                # 2. Get all data to map IDs to Row Numbers locally
+                                # (This is 1 API Call instead of N calls)
+                                all_vals = sheet_target.get_all_values()
+                                if not all_vals:
+                                    st.error("Target sheet is empty.")
+                                    st.stop()
+                                    
+                                headers = [str(h).strip().lower() for h in all_vals[0]]
+                                
+                                # 3. Find the column indices dynamically
+                                # Find ID Column Index (0-based)
+                                try:
+                                    target_id_idx = next(i for i, h in enumerate(headers) if 'id' in h)
+                                except StopIteration:
+                                    target_id_idx = 23 # Fallback to Column X (Index 23) based on previous code
+                                
+                                # Find Score Destination Column Index (0-based)
+                                # Look for "Average", "Rank", "Score". Fallback to Column Y (Index 24)
+                                try:
+                                    target_score_idx = next(i for i, h in enumerate(headers) if ('average' in h or 'rank' in h) and i != target_id_idx)
+                                except StopIteration:
+                                    target_score_idx = 24 
 
-                            updates_count = 0
+                                # 4. Create a Map: {PNM_ID_STRING : Row_Number_Integer}
+                                # Rows in gspread are 1-based. all_vals[0] is header (Row 1).
+                                id_to_row_map = {}
+                                for i, row in enumerate(all_vals):
+                                    if i == 0: continue # Skip header
+                                    if len(row) > target_id_idx:
+                                        # Normalize ID to string and strip whitespace for matching
+                                        p_id_str = str(row[target_id_idx]).strip()
+                                        id_to_row_map[p_id_str] = i + 1
 
-                            for idx, row in avg_df.iterrows():
+                                # 5. Prepare the Batch Update List
+                                cells_to_update = []
+                                updates_count = 0
+                                
+                                for idx, row in avg_df.iterrows():
+                                    p_id = str(row[id_col]).strip()
+                                    new_score = round(row['Calculated Average'], 2)
+                                    
+                                    if p_id in id_to_row_map:
+                                        row_num = id_to_row_map[p_id]
+                                        # gspread.Cell(row, col, value)
+                                        # Note: col is 1-based for gspread, so we add 1 to index
+                                        cells_to_update.append(
+                                            gspread.Cell(row_num, target_score_idx + 1, new_score)
+                                        )
+                                        updates_count += 1
+                                
+                                # 6. Send ONE API call to update everything
+                                if cells_to_update:
+                                    sheet_target.update_cells(cells_to_update)
+                                    st.success(f"✅ INSTANTLY synced {updates_count} rankings!")
+                                else:
+                                    st.warning("No matching IDs found to update.")
 
-                                p_id = row[id_col]
-
-                                score = round(row['Calculated Average'], 2)
-
-                                if update_pnm_ranking(p_id, score):
-
-                                    updates_count += 1
-
-                        st.success(f"✅ Auto-synced {updates_count} PNM rankings!")
-
-                    
-
-                    st.subheader("📄 Raw Ranking Data (PNM Rankings Sheet)")
-
-                    st.dataframe(df_votes, use_container_width=True)
-
-                else:
-
-                    st.error("Missing 'PNM ID' or 'Score' columns.")
-
-            except Exception as e:
-
-                st.error(f"Error processing rankings: {e}")
+                            except Exception as e:
+                                st.error(f"Error during batch sync: {e}")
 
         else:
 
