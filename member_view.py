@@ -4,6 +4,8 @@ import pandas as pd
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 
+st.set_page_config(layout="wide", page_title="Sorority Member Recruitment Portal")
+
 # --- CONFIGURATION ---
 SHEET_NAME = "OverallMatchingInformation"
 
