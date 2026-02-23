@@ -67,11 +67,11 @@ def load_data_from_sheet(sheet_name):
     required_tabs = [
         "Member Information", 
         "PNM Information",
-        "PNM Rankings",  # Added based on attached files
+        "PNM Rankings",  
         "Bump Teams", 
         "Party Excuses", 
         "Prior Connections",
-        "Settings"       # Added based on attached files
+        "Settings"       
     ]
 
     with st.spinner(f"Fetching data from '{sheet_name}'..."):
@@ -82,8 +82,10 @@ def load_data_from_sheet(sheet_name):
                 df = pd.DataFrame(records)
                 data_dict[tab] = df
             except gspread.exceptions.WorksheetNotFound:
-                if tab not in ["PNM Rankings", "Settings"]: # Settings/Rankings are optional
+                if tab not in ["PNM Rankings", "Settings", "Prior Connections", "Party Excuses"]: 
                     st.warning(f"⚠️ Worksheet '{tab}' not found. Using empty DataFrame.")
+                data_dict[tab] = pd.DataFrame()
+            except Exception as e:
                 data_dict[tab] = pd.DataFrame()
     
     return data_dict
@@ -190,38 +192,37 @@ if st.button("Run Matching Algorithm"):
         
         # MEMBERS: Check for "Full Name"
         if "Full Name" not in member_interest.columns:
-             # Fallback if specific column is missing
+             # Fallback if spec was wrong
              if "First Name" in member_interest.columns and "Last Name" in member_interest.columns:
                   member_interest["Full Name"] = member_interest["First Name"] + " " + member_interest["Last Name"]
              else:
-                  st.error("Member sheet missing 'Full Name' column.")
+                  st.error("Member sheet must have a 'Full Name' column.")
                   st.stop()
 
-        # PNMS: Check for "PNM Name" and normalize to "Full Name"
+        # PNMS: Check for "PNM Name" and rename to "Full Name" for internal logic
         pnm_working = pnm_intial_interest.copy()
         
         if "PNM Name" in pnm_working.columns:
              pnm_working["Full Name"] = pnm_working["PNM Name"]
-        elif "Full Name" not in pnm_working.columns:
-             # Fallback if neither PNM Name nor Full Name exist
-             if "First Name" in pnm_working.columns and "Last Name" in pnm_working.columns:
-                  pnm_working["Full Name"] = pnm_working["First Name"] + " " + pnm_working["Last Name"]
-             else:
-                  st.error("PNM sheet missing 'PNM Name' column.")
-                  st.stop()
-        
-        # MERGE RANKINGS
-        if not pnm_rankings.empty and 'PNM ID' in pnm_rankings.columns and 'Rank' in pnm_rankings.columns:
-            # Clean IDs for merge
-            pnm_working['PNM ID'] = pnm_working['PNM ID'].astype(str).str.strip()
-            pnm_rankings['PNM ID'] = pnm_rankings['PNM ID'].astype(str).str.strip()
-            pnm_rankings['Rank'] = pd.to_numeric(pnm_rankings['Rank'], errors='coerce')
-            
-            # Merge
-            pnm_working = pd.merge(pnm_working, pnm_rankings[['PNM ID', 'Rank']], on='PNM ID', how='left')
-            pnm_working['Rank'] = pnm_working['Rank'].fillna(1.0)
+        elif "Full Name" in pnm_working.columns:
+             pass # Already exists
         else:
-            pnm_working['Rank'] = 1.0 # Default if no ranking sheet
+             st.error("PNM sheet must have a 'PNM Name' column.")
+             st.stop()
+        
+        # Clean PNM IDs for consistency
+        if 'PNM ID' in pnm_working.columns:
+            pnm_working['PNM ID'] = pnm_working['PNM ID'].astype(str).str.strip()
+
+        # --- RANKING LOGIC UPDATE ---
+        # User specified "Average Recruit Rank" is already in PNM Information sheet
+        # We ensure it is numeric and fill NaNs with 1.0 (highest priority/default)
+        if "Average Recruit Rank" in pnm_working.columns:
+            pnm_working["Average Recruit Rank"] = pd.to_numeric(pnm_working["Average Recruit Rank"], errors='coerce').fillna(1.0)
+        else:
+            # Fallback if column is missing
+            st.warning("Column 'Average Recruit Rank' not found in PNM Information. Defaulting to 1.0.")
+            pnm_working["Average Recruit Rank"] = 1.0
 
         # Handle Party Assignments
         if 'Party' in pnm_working.columns and pnm_working['Party'].any():
@@ -558,8 +559,8 @@ if st.button("Run Matching Algorithm"):
             pnm_list = []
             for i, row in enumerate(pnms_df.to_dict('records')):
                 p_attrs = set(str(row['attributes_for_matching']).split(', '))
-                # Use 'Rank' from merged dataframe
-                p_rank = row.get("Rank", 1.0)
+                # Use 'Average Recruit Rank' from the Sheet
+                p_rank = row.get("Average Recruit Rank", 1.0)
                 if pd.isna(p_rank): p_rank = 1.0
                 
                 pnm_list.append({
