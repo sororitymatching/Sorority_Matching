@@ -779,27 +779,47 @@ else:
                                 for tgt, amt in flow_dict[p['node']].items():
                                     if amt > 0:
                                         if tgt == dummy:
-                                            global_results.append({'PNM': p['name'], 'Team': 'NO MATCH', 'Reason': 'Conflict/Capacity'})
+                                            global_results.append({
+                                                'PNM': p['name'], 'Team': 'NO MATCH', 
+                                                'Cost': None, 'Reason': 'Conflict/Capacity'
+                                            })
                                         else:
                                             info = pair_lookup.get((p['node'], tgt))
                                             if info:
-                                                global_results.append({'PNM': p['name'], 'Team': info['team_members'], 'Cost': round(info['cost'], 4), 'Reason': info['reasons']})
+                                                global_results.append({
+                                                    'PNM': p['name'], 'Team': info['team_members'], 
+                                                    'Cost': round(info['cost'], 4), 'Reason': info['reasons']
+                                                })
                                                 assign_map_flow[info['t_idx']].append({'p_id': p['id'], 'p_name': p['name'], 'p_attrs': p['attrs']})
                                                 matched = True
-                            if not matched: global_results.append({'PNM': p['name'], 'Team': 'ERROR', 'Reason': 'Flow Error'})
+                            if not matched: 
+                                global_results.append({'PNM': p['name'], 'Team': 'ERROR', 'Cost': None, 'Reason': 'Flow Error'})
                     except: st.error(f"Party {party} Global Flow Failed")
 
                     # A2. Greedy
                     potential_pairs.sort(key=lambda x: x['cost'])
                     matched_pnm_ids = set()
                     team_counts = {t['t_idx']: 0 for t in team_nodes}
+                    
+                    # 1. Matched Loop
                     for pair in potential_pairs:
                         if pair['p_id'] not in matched_pnm_ids:
                             if team_counts[pair['t_idx']] < num_pnm_matches_needed:
                                 matched_pnm_ids.add(pair['p_id'])
                                 team_counts[pair['t_idx']] += 1
-                                global_greedy.append({'PNM': pair['p_name'], 'Team': pair['team_members'], 'Cost': round(pair['cost'], 4), 'Reason': pair['reasons']})
+                                global_greedy.append({
+                                    'PNM': pair['p_name'], 'Team': pair['team_members'], 
+                                    'Cost': round(pair['cost'], 4), 'Reason': pair['reasons']
+                                })
                                 assign_map_greedy[pair['t_idx']].append(pair)
+                    
+                    # 2. Unmatched Loop (The previously missing piece)
+                    for p in pnm_nodes:
+                        if p['id'] not in matched_pnm_ids:
+                            global_greedy.append({
+                                'PNM': p['name'], 'Team': 'NO MATCH', 
+                                'Cost': None, 'Reason': 'No Match (Greedy/Capacity)'
+                            })
                     
                     # B. Internal
                     actual_rounds = 1 if bump_order_set == 'yes' else num_rounds_party
@@ -815,6 +835,10 @@ else:
                         df_gf = pd.DataFrame(global_results)
                         df_gg = pd.DataFrame(global_greedy)
                         
+                        # Fix for KeyError: Ensure Cost Column Exists
+                        if 'Cost' not in df_gf.columns: df_gf['Cost'] = np.nan
+                        if 'Cost' not in df_gg.columns: df_gg['Cost'] = np.nan
+
                         flow_costs = pd.to_numeric(df_gf['Cost'], errors='coerce').dropna()
                         greedy_costs = pd.to_numeric(df_gg['Cost'], errors='coerce').dropna()
                         
