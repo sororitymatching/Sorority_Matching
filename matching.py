@@ -188,20 +188,22 @@ if st.button("Run Matching Algorithm"):
         
         # --- 1. PRE-PROCESSING ---
         
-        # MEMBERS: Full Name (First Name + Last Name)
-        if "First Name" in member_interest.columns and "Last Name" in member_interest.columns:
-             member_interest["Full Name"] = member_interest["First Name"] + " " + member_interest["Last Name"]
-        else:
-             st.error("Member sheet missing 'First Name' or 'Last Name' columns.")
-             st.stop()
+        # MEMBERS: Check for "Full Name" first, otherwise construct it
+        if "Full Name" not in member_interest.columns:
+             if "First Name" in member_interest.columns and "Last Name" in member_interest.columns:
+                  member_interest["Full Name"] = member_interest["First Name"] + " " + member_interest["Last Name"]
+             else:
+                  st.error("Member sheet missing 'Full Name' column (and missing 'First Name'/'Last Name' to construct it).")
+                  st.stop()
 
-        # PNMS: Full Name (First Name + Last Name)
+        # PNMS: Check for "Full Name" first, otherwise construct it
         pnm_working = pnm_intial_interest.copy()
-        if "First Name" in pnm_working.columns and "Last Name" in pnm_working.columns:
-             pnm_working["Full Name"] = pnm_working["First Name"] + " " + pnm_working["Last Name"]
-        else:
-             st.error("PNM sheet missing 'First Name' or 'Last Name' columns.")
-             st.stop()
+        if "Full Name" not in pnm_working.columns:
+             if "First Name" in pnm_working.columns and "Last Name" in pnm_working.columns:
+                  pnm_working["Full Name"] = pnm_working["First Name"] + " " + pnm_working["Last Name"]
+             else:
+                  st.error("PNM sheet missing 'Full Name' column (and missing 'First Name'/'Last Name' to construct it).")
+                  st.stop()
         
         # MERGE RANKINGS
         if not pnm_rankings.empty and 'PNM ID' in pnm_rankings.columns and 'Rank' in pnm_rankings.columns:
