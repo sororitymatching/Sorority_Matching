@@ -75,6 +75,41 @@ def update_roster(names_list):
         return True
     except: return False
 
+def get_active_roster_names():
+    """
+    Returns the list of active members.
+    Priority:
+    1. 'Settings' sheet Column D (Populated via CSV Upload or Sync).
+    2. Fallback to 'Member Information' sheet if Settings is empty.
+    """
+    # 1. Try getting from Settings (The "Uploaded/Synced" Roster)
+    try:
+        gc = get_gc()
+        sheet = gc.open(SHEET_NAME).worksheet("Settings")
+        # Assuming D2:D contains the list
+        roster_data = sheet.get_values("D2:D")
+        names = [r[0].strip() for r in roster_data if r and r[0].strip()]
+        if names:
+            return names
+    except Exception:
+        pass
+
+    # 2. Fallback to Member Information Sheet
+    df_mem = get_data("Member Information")
+    if not df_mem.empty:
+        # Attempt to find the Name column dynamically
+        possible_cols = ["Full Name", "Name", "Member Name", "Member"]
+        found_col = None
+        for col in df_mem.columns:
+            if any(c.lower() in col.lower() for c in possible_cols):
+                found_col = col
+                break
+        
+        if found_col:
+            return df_mem[found_col].dropna().astype(str).str.strip().tolist()
+    
+    return []
+
 def update_team_ranking(team_id, new_ranking):
     try:
         gc = get_gc()
@@ -442,6 +477,13 @@ else:
                 num_of_parties = int(parties_val) if parties_val and str(parties_val).isdigit() else 4
                 st.info(f"Using {num_of_parties} parties (configured in Settings).")
                 
+                # LOAD ACTIVE ROSTER
+                active_roster = get_active_roster_names()
+                if active_roster:
+                    st.info(f"Loaded {len(active_roster)} active members from Roster (Settings/CSV).")
+                else:
+                    st.warning("No active roster found. Attempting to match with all members in database.")
+
                 # LOAD DATA
                 bump_teams = get_data("Bump Teams")
                 party_excuses = get_data("Party Excuses")
@@ -453,12 +495,24 @@ else:
                     st.error("Missing critical data (PNM Information or Bump Teams).")
                     st.stop()
 
-                # --- 0. SMART COLUMN NORMALIZATION (THE FIX) ---
-                # This normalizes headers (whether from Form or Paste) to:
-                # 'Full Name', 'Major', 'Minor', 'Hometown', 'Year', 'Hobbies', etc.
+                # --- 0. SMART COLUMN NORMALIZATION ---
                 pnm_working = standardize_columns(pnm_intial_interest.copy(), entity_type='pnm')
                 member_interest = standardize_columns(member_interest, entity_type='member')
                 
+                # --- FILTER MEMBERS BASED ON ROSTER ---
+                if active_roster and not member_interest.empty:
+                    # Normalize for case-insensitive comparison
+                    active_set = set(n.strip().lower() for n in active_roster)
+                    # Filter: Keep members whose normalized name is in the active set
+                    member_interest = member_interest[
+                        member_interest['Full Name'].astype(str).str.strip().str.lower().isin(active_set)
+                    ]
+                    st.success(f"Filtered member database to {len(member_interest)} matching entries from active roster.")
+
+                if member_interest.empty:
+                    st.error("No member information matched the active roster. Cannot proceed.")
+                    st.stop()
+
                 # Also normalize excuses and connections lightly to find names
                 if not party_excuses.empty:
                     party_excuses.columns = party_excuses.columns.str.strip()
