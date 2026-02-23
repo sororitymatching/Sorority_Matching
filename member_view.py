@@ -29,10 +29,25 @@ def get_gspread_client():
 def get_sheet(worksheet_name):
     client = get_gspread_client()
     if not client: return None
+    
+    # 1. Try to open the Spreadsheet File first
     try:
-        return client.open(SHEET_NAME).worksheet(worksheet_name)
+        sh = client.open(SHEET_NAME)
+    except gspread.SpreadsheetNotFound:
+        st.error(f"❌ CRITICAL ERROR: The Google Sheet file named '{SHEET_NAME}' was not found. Please ensure the file exists in Google Drive and is shared with the Service Account email.")
+        return None
     except Exception as e:
-        st.error(f"❌ Worksheet '{worksheet_name}' not found. Please create it.")
+        st.error(f"❌ Error opening Spreadsheet: {e}")
+        return None
+
+    # 2. Try to open the specific Tab/Worksheet
+    try:
+        return sh.worksheet(worksheet_name)
+    except gspread.WorksheetNotFound:
+        st.error(f"❌ The Spreadsheet exists, but the tab '{worksheet_name}' was not found. Please check for typos or extra spaces.")
+        return None
+    except Exception as e:
+        st.error(f"❌ Error opening Worksheet '{worksheet_name}': {e}")
         return None
 
 # --- HELPER FUNCTIONS FOR SEARCHING DATA ---
