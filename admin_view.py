@@ -88,6 +88,7 @@ def update_team_ranking(team_id, new_ranking):
         st.error(f"Error updating team ranking: {e}")
         return False
 
+# NOTE: This function is kept for legacy compatibility but is bypassed in the optimized sync below.
 def update_pnm_ranking(pnm_id, new_ranking):
     try:
         gc = get_gc()
@@ -120,7 +121,6 @@ def standardize_columns(df, entity_type='pnm'):
     df.columns = df.columns.str.strip()
     
     # Dictionary of {Canonical_Name: [List of possible header substrings]}
-    # The code checks if the column header CONTAINS these strings (case-insensitive)
     mappings = {
         'Full Name': ['name', 'member name', 'pnm name', 'student name'],
         'Major': ['major', 'program of study'],
@@ -138,7 +138,6 @@ def standardize_columns(df, entity_type='pnm'):
 
     # 1. Try to find matches
     for canonical, possibilities in mappings.items():
-        # strict preference for exact matches first
         found = False
         for col in df.columns:
             if col in used_cols: continue
@@ -148,11 +147,9 @@ def standardize_columns(df, entity_type='pnm'):
                 found = True
                 break
         
-        # fuzzy match if exact not found
         if not found:
             for col in df.columns:
                 if col in used_cols: continue
-                # Check if any keyword is in the column name
                 if any(p in col.lower() for p in possibilities):
                     new_cols[col] = canonical
                     used_cols.add(col)
@@ -164,18 +161,14 @@ def standardize_columns(df, entity_type='pnm'):
     # 3. Generate IDs if missing (Crucial for pasted data)
     id_col = 'PNM ID' if entity_type == 'pnm' else 'Sorority ID'
     
-    # If we mapped something to 'ID', rename it to specific ID
     if 'ID' in df.columns:
         df.rename(columns={'ID': id_col}, inplace=True)
     
-    # If ID column doesn't exist or has blanks, generate them
     if id_col not in df.columns:
         df[id_col] = range(1, len(df) + 1)
     else:
-        # Fill empty/NaN IDs with generated ones
         df[id_col] = df[id_col].replace('', np.nan)
         if df[id_col].isnull().any():
-            # Find max existing ID to continue sequence
             try:
                 max_id = pd.to_numeric(df[id_col], errors='coerce').max()
                 if pd.isna(max_id): max_id = 0
@@ -284,7 +277,7 @@ else:
         else:
             st.info("No member information found.")
 
-    # --- TAB 3: PNM RANKINGS ---
+    # --- TAB 3: PNM RANKINGS (OPTIMIZED) ---
     with tab3:
         st.header("PNM Ranking Management")
         df_votes = get_data("PNM Rankings")
@@ -307,15 +300,70 @@ else:
                     
                     st.info(f"Processing {len(df_votes)} total votes across {len(avg_df)} unique PNMs...")
                     
+                    # --- BATCH UPDATE LOGIC START ---
                     if st.button("Sync Rankings to PNM Sheet"):
                         with st.spinner("Syncing..."):
-                            updates_count = 0
-                            for idx, row in avg_df.iterrows():
-                                p_id = row[id_col]
-                                score = round(row['Calculated Average'], 2)
-                                if update_pnm_ranking(p_id, score):
-                                    updates_count += 1
-                        st.success(f"✅ Auto-synced {updates_count} PNM rankings!")
+                            try:
+                                # 1. Open target sheet once
+                                gc = get_gc()
+                                sheet_target = gc.open(SHEET_NAME).worksheet("PNM Information")
+                                
+                                # 2. Get all data to map IDs
+                                all_vals = sheet_target.get_all_values()
+                                if not all_vals:
+                                    st.error("Target sheet is empty.")
+                                    st.stop()
+
+                                # Headers are usually row 1
+                                headers = [str(h).strip().lower() for h in all_vals[0]]
+                                
+                                # 3. Find Indices
+                                # Find ID column index (0-based)
+                                try:
+                                    target_id_idx = next(i for i, h in enumerate(headers) if 'id' in h)
+                                except StopIteration:
+                                    target_id_idx = 23 # Fallback based on old code
+                                
+                                # Find Score Destination column index (0-based)
+                                try:
+                                    target_score_idx = next(i for i, h in enumerate(headers) if ('average' in h or 'rank' in h) and i != target_id_idx)
+                                except StopIteration:
+                                    target_score_idx = 24 # Fallback based on old code
+
+                                # 4. Create ID -> Row Map
+                                id_to_row_map = {}
+                                for i, row in enumerate(all_vals):
+                                    if i == 0: continue # skip header
+                                    if len(row) > target_id_idx:
+                                        p_id_str = str(row[target_id_idx]).strip()
+                                        id_to_row_map[p_id_str] = i + 1 # 1-based row index
+                                
+                                # 5. Build Update List
+                                cells_to_update = []
+                                updates_count = 0
+                                
+                                for idx, row in avg_df.iterrows():
+                                    p_id = str(row[id_col]).strip()
+                                    new_score = round(row['Calculated Average'], 2)
+                                    
+                                    if p_id in id_to_row_map:
+                                        row_num = id_to_row_map[p_id]
+                                        # gspread uses 1-based indexing for Cell(row, col)
+                                        cells_to_update.append(
+                                            gspread.Cell(row_num, target_score_idx + 1, new_score)
+                                        )
+                                        updates_count += 1
+                                
+                                # 6. Send One API Call
+                                if cells_to_update:
+                                    sheet_target.update_cells(cells_to_update)
+                                    st.success(f"✅ INSTANTLY synced {updates_count} PNM rankings!")
+                                else:
+                                    st.warning("No matching IDs found to update.")
+
+                            except Exception as e:
+                                st.error(f"Error during batch sync: {e}")
+                    # --- BATCH UPDATE LOGIC END ---
                     
                     st.subheader("📄 Raw Ranking Data (PNM Rankings Sheet)")
                     st.dataframe(df_votes, use_container_width=True)
