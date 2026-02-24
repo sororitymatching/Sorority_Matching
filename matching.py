@@ -131,7 +131,7 @@ if run_button:
             pnm_clean = pnm_intial_interest.rename(columns=pnm_col_map)
             df_mem = member_interest.copy()
             
-            # --- CLUSTERING LOGIC (Condensed for brevity, same as previous) ---
+            # --- CLUSTERING LOGIC ---
             all_coords, geo_tracker = [], []
             for idx, row in df_mem.iterrows():
                 lat, lon = get_coords_offline(row.get('Hometown'), city_coords_map, all_city_keys)
@@ -274,10 +274,10 @@ if run_button:
                             'node_id': f"t_{len(team_list)}", 'row_data': row
                         })
 
-                # --- Capacity Checks (Optional logging) ---
+                # --- Capacity Checks ---
                 total_capacity = len(team_list) * matches_per_team
                 if total_capacity < len(pnm_list):
-                    pass # Or st.warning(f"Party {party}: Low Capacity!")
+                    pass 
 
                 potential_pairs = []
                 for p_data in pnm_list:
@@ -513,7 +513,34 @@ if run_button:
                     df_bump_flow = pd.DataFrame(bump_instruct_flow)
                     df_bump_greedy = pd.DataFrame(bump_instruct_greedy)
 
+                    # --- SUMMARY CALCULATION ---
+                    flow_costs = df_glob_flow['Match Cost'].dropna()
+                    greedy_costs = df_glob_greedy['Match Cost'].dropna()
+
+                    summary_data = {
+                        'Metric': ['Total Cost', 'Average Cost', 'Min Cost', 'Max Cost', 'Std Dev'],
+                        'Global Network Flow': [
+                            round(flow_costs.sum(), 4),
+                            round(flow_costs.mean(), 4) if not flow_costs.empty else 0,
+                            round(flow_costs.min(), 4) if not flow_costs.empty else 0,
+                            round(flow_costs.max(), 4) if not flow_costs.empty else 0,
+                            round(flow_costs.std(), 4) if len(flow_costs) > 1 else 0
+                        ],
+                        'Global Greedy': [
+                            round(greedy_costs.sum(), 4),
+                            round(greedy_costs.mean(), 4) if not greedy_costs.empty else 0,
+                            round(greedy_costs.min(), 4) if not greedy_costs.empty else 0,
+                            round(greedy_costs.max(), 4) if not greedy_costs.empty else 0,
+                            round(greedy_costs.std(), 4) if len(greedy_costs) > 1 else 0
+                        ]
+                    }
+                    summary_df = pd.DataFrame(summary_data)
+
                     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                        # Write Summary Sheet first
+                        summary_df.to_excel(writer, sheet_name="Summary_Comparison", index=False); auto_adjust_columns(writer, "Summary_Comparison", summary_df)
+                        
+                        # Write Global Sheets
                         df_glob_flow.to_excel(writer, sheet_name="Global_Matches_Flow", index=False); auto_adjust_columns(writer, "Global_Matches_Flow", df_glob_flow)
                         df_glob_greedy.to_excel(writer, sheet_name="Global_Matches_Greedy", index=False); auto_adjust_columns(writer, "Global_Matches_Greedy", df_glob_greedy)
                         
