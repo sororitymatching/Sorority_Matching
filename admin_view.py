@@ -382,7 +382,7 @@ else:
 
             if id_col and creator_col:
                 df_teams['display_label'] = df_teams.apply(lambda x: f"Team {x[id_col]} | {x[creator_col]}, {x.get(partners_col, '')}", axis=1)
-                t1, t2 = st.tabs(["Single Team Update", "Bulk Upload CSV"])
+                t1, t2 = st.tabs(["Single Team Recruiter Ranking Update", "Bulk Team Recruiter Ranking Upload (CSV)"])
                 
                 with t1:
                     c1, c2, c3 = st.columns([3, 1, 1])
