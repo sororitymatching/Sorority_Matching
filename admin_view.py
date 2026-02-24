@@ -683,6 +683,10 @@ else:
                     except: return default
 
                 # === FIX START: Added compression and ensure download is OUTSIDE the 'with' block ===
+                
+                # List to store individual file data for later download buttons
+                individual_party_files = []
+                
                 with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
                     for party in range(1, int(num_parties) + 1):
                         progress_bar.progress(party / num_parties)
@@ -1027,16 +1031,36 @@ else:
                                         r1.to_excel(writer, sheet_name="Round_1_Matches_Greedy", index=False)
                                         auto_adjust_columns(writer, "Round_1_Matches_Greedy", r1)
                             
-                            zf.writestr(f"Party_{party}_Match_Analysis.xlsx", output.getvalue())
+                            # Save the output content to variables for later
+                            file_content = output.getvalue()
+                            file_name_x = f"Party_{party}_Match_Analysis.xlsx"
+                            
+                            # Add to zip
+                            zf.writestr(file_name_x, file_content)
+                            
+                            # Add to individual list
+                            individual_party_files.append((f"Party {party}", file_name_x, file_content))
 
                 # === FIX END: Now we are OUTSIDE the 'with' block, so the zip is finalized ===
                 progress_bar.empty()
                 status_text.empty()
                 st.success("Matching Complete!")
                 
+                # 1. Main ZIP Download
                 st.download_button(
                     label="Download All Matches (ZIP)",
                     data=zip_buffer.getvalue(),
                     file_name="recruitment_matches.zip",
                     mime="application/zip"
                 )
+                
+                # 2. Individual Downloads
+                st.write("### Individual Party Downloads")
+                for label, fname, data in individual_party_files:
+                    st.download_button(
+                        label=f"📥 Download {label} Excel",
+                        data=data,
+                        file_name=fname,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=f"dl_btn_{fname}"
+                    )
