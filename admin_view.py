@@ -646,6 +646,22 @@ else:
                     
                     status.update(label="Preprocessing Complete!", state="complete", expanded=False)
 
+                # --- STEP 2: CALCULATE GLOBAL RANKING STATS ---
+                # This ensures the ranking bonus is agnostic to the scale (1-3, 1-5, etc.)
+                try:
+                    all_ranks = pd.to_numeric(pnm_intial_interest['Average Recruit Rank'], errors='coerce')
+                    min_obs = all_ranks.min()
+                    if pd.isna(min_obs): min_obs = 1.0
+                    all_ranks = all_ranks.fillna(min_obs)
+                    global_max = all_ranks.max()
+                    global_min = all_ranks.min()
+                    
+                    # Avoid division by zero if everyone has the same rank
+                    if global_max == global_min: global_max += 1.0 
+                except Exception as e:
+                    st.error(f"Error calculating global ranking stats: {e}")
+                    global_max, global_min = 5.0, 1.0 # Fallback
+
                 # --- STEP 3: CORE MATCHING LOGIC ---
                 progress_bar = st.progress(0)
                 status_text = st.empty()
@@ -704,10 +720,28 @@ else:
 
                         for i, row in enumerate(pnm_records):
                             p_attrs = set(str(row['attributes_for_matching']).split(', '))
-                            p_rank = to_float(row.get("Average Recruit Rank", 1.0))
+                            p_rank_val = to_float(row.get("Average Recruit Rank", 1.0))
+                            
+                            # --- AGNOSTIC BONUS CALCULATION ---
+                            # Clamp val to observed range just in case
+                            safe_rank = max(global_min, min(p_rank_val, global_max))
+                            
+                            # Calculate relative strength (0.0 to 1.0)
+                            relative_strength = (safe_rank - global_min) / (global_max - global_min)
+                            
+                            # Weight: 3.0 means a perfect recruit gets +3.0 score benefit
+                            RANKING_WEIGHT = 3.0 
+                            pnm_bonus = relative_strength * RANKING_WEIGHT
+                            # ----------------------------------
+
                             pnm_list.append({
-                                'idx': i, 'id': row['PNM ID'], 'name': row.get('PNM Name', row.get('Full Name')),
-                                'attrs': p_attrs, 'rank': p_rank, 'bonus': 0.75 * (p_rank - 1), 'node_id': f"p_{i}"
+                                'idx': i, 
+                                'id': row['PNM ID'], 
+                                'name': row.get('PNM Name', row.get('Full Name')),
+                                'attrs': p_attrs, 
+                                'rank': p_rank_val, 
+                                'bonus': pnm_bonus, # Updated bonus
+                                'node_id': f"p_{i}"
                             })
 
                         party_excused_names = set(party_excuses[party_excuses["Choose the party/parties you are unable to attend:"] == party]["Member Name"])
