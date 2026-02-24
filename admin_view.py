@@ -446,14 +446,38 @@ else:
     # --- TAB 7: RUN MATCHING ---
     with tab7:
         st.header("Run Matching Algorithm")
-        
-        st.subheader("Matching Settings")
-        num_parties = st.number_input("Total Number of Parties", min_value=1, value=37)
-        pnms_per_party = st.number_input("PNMs Per Party", min_value=1, value=45)
-        matches_per_team = st.number_input("Matches per Bump Team (Capacity)", min_value=1, value=2)
-        num_rounds = st.number_input("Rounds per Party", min_value=1, value=4)
-        bump_order_set = st.radio("Is Bump Order Set?", ("Yes", "No"), horizontal=True)
-        is_bump_order_set = "y" if bump_order_set == "Yes" else "n"
+
+        # Create two columns for better layout in the main area
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.subheader("1. Source Data")
+            # Removed User Input, replaced with static info
+            st.info(f"Using Google Sheet: **{SHEET_NAME}**")
+            
+            if st.button("Refresh Data from Google Sheets"):
+                load_google_sheet_data.clear()
+                st.toast("Data cache cleared!")
+
+        with col2:
+            st.subheader("2. Settings")
+            
+            # --- MODIFIED: Pull from Settings Tab (cell B1) ---
+            try:
+                setting_parties = get_setting_value('B1')
+                num_parties = int(setting_parties) if setting_parties and str(setting_parties).isdigit() else 4
+            except:
+                num_parties = 4
+            
+            st.info(f"**Total Parties:** {num_parties} (Synced from Settings)")
+            # Removed: num_parties = st.number_input("Total Number of Parties", min_value=1, value=37)
+            
+            # Removed the "Number of PNMs to Process" slicing input
+            pnms_per_party = st.number_input("PNMs Per Party", min_value=1, value=45)
+            matches_per_team = st.number_input("Matches per Bump Team (Capacity)", min_value=1, value=2)
+            num_rounds = st.number_input("Rounds per Party", min_value=1, value=4)
+            bump_order_set = st.radio("Is Bump Order Set?", ("Yes", "No"), horizontal=True)
+            is_bump_order_set = "y" if bump_order_set == "Yes" else "n"
 
         st.divider()
         run_button = st.button("Run Matching Algorithm", type="primary", use_container_width=True)
