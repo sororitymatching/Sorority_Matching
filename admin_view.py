@@ -7,11 +7,13 @@ import re
 import difflib
 import io
 import zipfile
+import time  # Added for sleep/backoff
 from io import BytesIO
 from math import radians
 from sentence_transformers import SentenceTransformer
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.metrics.pairwise import haversine_distances
+from gspread.exceptions import APIError # Added for error handling
 
 # --- CONFIGURATION ---
 SHEET_NAME = "OverallMatchingInformation"
@@ -42,7 +44,10 @@ def load_city_database():
         st.error(f"Failed to load city database: {e}")
         return {}, []
 
-# --- HELPERS ---
+# --- HELPERS WITH RETRY & CACHING ---
+
+# 1. Cache the connection object so we don't re-authenticate constantly
+@st.cache_resource
 def get_gc():
     if "gcp_service_account" not in st.secrets:
         st.error("Missing 'gcp_service_account' in Streamlit secrets.")
@@ -50,48 +55,64 @@ def get_gc():
     creds_dict = dict(st.secrets["gcp_service_account"])
     return gspread.service_account_from_dict(creds_dict, scopes=SCOPES)
 
+# 2. Retry wrapper to handle 429 errors automatically
+def smart_read_sheet(sheet_object):
+    """Tries to read a sheet, waits and retries if quota is hit."""
+    for n in range(5): # Try 5 times
+        try:
+            return sheet_object.get_all_values()
+        except APIError as e:
+            if "429" in str(e):
+                wait_time = (2 ** n) + 1 # Exponential backoff: 2s, 3s, 5s...
+                time.sleep(wait_time)
+            else:
+                raise e
+    return [] # Return empty if all retries fail
+
+# 3. Cache the data fetching (TTL=600s means it refreshes every 10 mins automatically)
+@st.cache_data(ttl=600)
 def get_data(worksheet_name):
     """Gets all data and standardizes headers slightly."""
     try:
         gc = get_gc()
+        # Open sheet but use retry logic for the actual read
         sheet = gc.open(SHEET_NAME).worksheet(worksheet_name)
-        data = sheet.get_all_values()
+        data = smart_read_sheet(sheet)
+        
         if not data: return pd.DataFrame()
         df = pd.DataFrame(data[1:], columns=data[0])
         df.columns = df.columns.str.strip()
         return df
     except Exception as e:
-        if worksheet_name == "PNM Information":
-             st.warning("Could not find 'PNM Information' tab.")
+        # Avoid error spam if sheet is just missing
+        if worksheet_name != "PNM Information": 
+            pass 
         return pd.DataFrame()
 
+# 4. Cache the bulk loader used in "Run Matching"
+@st.cache_data(ttl=600)
 def load_google_sheet_data(sheet_name):
     """
     Loads data from Google Sheets using gspread and st.secrets.
     """
     try:
-        # Authenticate using secrets
-        if "gcp_service_account" not in st.secrets:
-            st.error("❌ Google Credentials not found in st.secrets.")
-            return None, None, None, None, None
-
-        gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
+        gc = get_gc()
         sh = gc.open(sheet_name)
 
-        # Helper to get DataFrame from worksheet
+        # Helper to get DataFrame from worksheet with retry logic
         def get_df(ws_name):
             try:
                 ws = sh.worksheet(ws_name)
-                # Get all values as list of lists
-                data = ws.get_all_values()
+                data = smart_read_sheet(ws)
                 if not data:
                     return pd.DataFrame()
-                # Create DataFrame, assuming first row is header
                 df = pd.DataFrame(data[1:], columns=data[0])
                 return df
             except gspread.WorksheetNotFound:
                 st.error(f"Worksheet '{ws_name}' not found in the spreadsheet.")
                 return None
+            except Exception as e:
+                return pd.DataFrame()
 
         # Load specific sheets
         bump_teams = get_df("Bump Teams")
@@ -132,14 +153,18 @@ def update_roster(names_list):
     except: return False
 
 def get_active_roster_names():
+    # Attempt to pull from cache first via get_data if possible, 
+    # but since this reads 'Settings' specifically (a custom range), we try/except it.
     try:
         gc = get_gc()
         sheet = gc.open(SHEET_NAME).worksheet("Settings")
+        # Reading a single column is usually cheap, but could fail if quota is tight
         roster_data = sheet.get_values("D2:D")
         names = [r[0].strip() for r in roster_data if r and r[0].strip()]
         if names: return names
     except: pass
 
+    # Fallback to member info (which IS cached now)
     df_mem = get_data("Member Information")
     if not df_mem.empty:
         possible_cols = ["Full Name", "Name", "Member Name", "Member"]
@@ -158,6 +183,9 @@ def update_team_ranking(team_id, new_ranking):
         cell = sheet.find(str(team_id), in_column=5)
         if cell:
             sheet.update_cell(cell.row, 6, new_ranking)
+            # Clear cache so user sees update immediately
+            get_data.clear()
+            load_google_sheet_data.clear()
             return True
         return False
     except: return False
@@ -166,7 +194,7 @@ def batch_update_pnm_rankings(rankings_map):
     try:
         gc = get_gc()
         sheet = gc.open(SHEET_NAME).worksheet("PNM Information")
-        all_values = sheet.get_all_values()
+        all_values = smart_read_sheet(sheet) # Use smart read
         if not all_values: return 0
         headers = [h.lower().strip() for h in all_values[0]]
         
@@ -186,6 +214,10 @@ def batch_update_pnm_rankings(rankings_map):
                 row[rank_idx] = str(rankings_map[p_id])
                 updates_count += 1
         sheet.update(values=all_values, range_name="A1")
+        
+        # Clear cache
+        get_data.clear()
+        load_google_sheet_data.clear()
         return updates_count
     except Exception as e:
         st.error(f"Batch update failed: {e}")
@@ -195,7 +227,7 @@ def batch_update_team_rankings(rankings_map):
     try:
         gc = get_gc()
         sheet = gc.open(SHEET_NAME).worksheet("Bump Teams")
-        all_values = sheet.get_all_values()
+        all_values = smart_read_sheet(sheet) # Use smart read
         if not all_values: return 0
         headers = [h.lower().strip() for h in all_values[0]]
         
@@ -214,6 +246,10 @@ def batch_update_team_rankings(rankings_map):
                 row[rank_idx] = str(rankings_map[t_id])
                 updates_count += 1
         sheet.update(values=all_values, range_name="A1")
+        
+        # Clear cache
+        get_data.clear()
+        load_google_sheet_data.clear()
         return updates_count
     except Exception as e:
         st.error(f"Batch update failed: {e}")
@@ -281,7 +317,9 @@ else:
         with col_r1:
             st.subheader("Option A: Sync from Sheet")
             st.info("Pull names directly from the 'Member Information' tab.")
+            # FORCE REFRESH HERE
             if st.button("🔄 Sync Roster from 'Member Information'"):
+                st.cache_data.clear() # Clear cache to ensure we get fresh data
                 df_source = get_data("Member Information")
                 if not df_source.empty:
                     possible_cols = ["Full Name", "Name", "Member Name", "Member"]
@@ -318,7 +356,11 @@ else:
     # --- TAB 2: MEMBER INFORMATION ---
     with tab2:
         st.header("Member Information Database")
-        if st.button("🔄 Refresh Member Data"): st.rerun()
+        # Updated to clear cache
+        if st.button("🔄 Refresh Member Data"): 
+            st.cache_data.clear()
+            st.rerun()
+            
         df_members = get_data("Member Information")
         if not df_members.empty:
             search_mem = st.text_input("🔍 Search Members:")
@@ -432,13 +474,17 @@ else:
     # --- TAB 5 & 6: EXCUSES & CONNECTIONS ---
     with tab5:
         st.header("Member Party Excuses")
-        if st.button("🔄 Refresh Excuses"): st.rerun()
+        if st.button("🔄 Refresh Excuses"): 
+            st.cache_data.clear()
+            st.rerun()
         df_ex = get_data("Party Excuses")
         if not df_ex.empty: st.dataframe(df_ex, use_container_width=True)
         else: st.info("No excuses found.")
     with tab6:
         st.header("Prior PNM Connections Log")
-        if st.button("🔄 Refresh Connections"): st.rerun()
+        if st.button("🔄 Refresh Connections"): 
+            st.cache_data.clear()
+            st.rerun()
         df_conn = get_data("Prior Connections")
         if not df_conn.empty: st.dataframe(df_conn, use_container_width=True)
         else: st.info("No prior connections found.")
@@ -468,6 +514,7 @@ else:
         if run_button:
             with st.spinner("Connecting to Google Sheets & Loading Data..."):
                 # Load Data from Google Sheets (Hardcoded SHEET_NAME)
+                # This uses the CACHED function now
                 bump_teams, party_excuses, pnm_intial_interest, member_interest, member_pnm_no_match = load_google_sheet_data(SHEET_NAME)
 
             if any(df is None for df in [bump_teams, party_excuses, pnm_intial_interest, member_interest, member_pnm_no_match]):
