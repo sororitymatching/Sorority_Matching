@@ -400,7 +400,7 @@ else:
                             if update_team_ranking(sel_id, new_rank): st.success(f"Rank {new_rank} assigned!"); st.rerun()
 
                 with t2:
-                    st.info("Upload a CSV with columns: `Team ID` (or `Creator Name`) and `Ranking`.")
+                    st.info('Upload a CSV with columns: "Team ID" (or "Creator Name") and "Ranking".')
                     team_csv = st.file_uploader("Upload Rankings CSV", type=["csv"], key="team_rank_upload")
                     if team_csv and st.button("Process Bulk Update"):
                         try:
