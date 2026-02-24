@@ -454,7 +454,7 @@ else:
         except:
             num_parties = 4
             
-        st.info(f"**Total Parties:** {num_parties} (Synced from Settings)")
+        st.info(f"**Total Parties:** {num_parties} (Synced from Settings & Roster Tab)")
         pnms_per_party = st.number_input("PNMs Per Party", min_value=1, value=45)
         matches_per_team = st.number_input("Matches per Bump Team (Capacity)", min_value=1, value=2)
         num_rounds = st.number_input("Rounds per Party", min_value=1, value=4)
