@@ -445,24 +445,31 @@ else:
 
     # --- TAB 7: RUN MATCHING ---
     with tab7:
-        st.subheader("Matching Configuration")
-        st.sidebar.header("1. Configuration")
-        sheet_name_input = st.sidebar.text_input("Google Sheet Name", value="OverallMatchingInformation")
-        refresh_data = st.sidebar.button("Refresh Data from Google Sheets")
+        st.header("Run Matching Algorithm")
 
-        if refresh_data:
-            load_google_sheet_data.clear()
+        # Create two columns for better layout in the main area
+        col1, col2 = st.columns(2)
 
-        st.sidebar.header("2. Settings")
-        num_parties = st.sidebar.number_input("Total Number of Parties", min_value=1, value=37)
-        pnms_to_process = st.sidebar.number_input("Number of PNMs to Process (Slice)", min_value=1, value=1665)
-        pnms_per_party = st.sidebar.number_input("PNMs Per Party", min_value=1, value=45)
-        matches_per_team = st.sidebar.number_input("Matches per Bump Team (Capacity)", min_value=1, value=2)
-        num_rounds = st.sidebar.number_input("Rounds per Party", min_value=1, value=4)
-        bump_order_set = st.sidebar.radio("Is Bump Order Set?", ("Yes", "No"))
-        is_bump_order_set = "y" if bump_order_set == "Yes" else "n"
+        with col1:
+            st.subheader("1. Source Data")
+            sheet_name_input = st.text_input("Google Sheet Name", value="OverallMatchingInformation")
+            
+            if st.button("Refresh Data from Google Sheets"):
+                load_google_sheet_data.clear()
+                st.toast("Data cache cleared!")
 
-        run_button = st.sidebar.button("Run Matching Algorithm", type="primary")
+        with col2:
+            st.subheader("2. Settings")
+            num_parties = st.number_input("Total Number of Parties", min_value=1, value=37)
+            pnms_to_process = st.number_input("Number of PNMs to Process (Slice)", min_value=1, value=1665)
+            pnms_per_party = st.number_input("PNMs Per Party", min_value=1, value=45)
+            matches_per_team = st.number_input("Matches per Bump Team (Capacity)", min_value=1, value=2)
+            num_rounds = st.number_input("Rounds per Party", min_value=1, value=4)
+            bump_order_set = st.radio("Is Bump Order Set?", ("Yes", "No"), horizontal=True)
+            is_bump_order_set = "y" if bump_order_set == "Yes" else "n"
+
+        st.divider()
+        run_button = st.button("Run Matching Algorithm", type="primary", use_container_width=True)
 
         # --- MAIN LOGIC ---
         if run_button:
@@ -822,7 +829,7 @@ else:
                                                 reason = ", ".join(shared) if shared else "Rotation"
                                                 if is_repeat: reason += " (Repeat)"
                                                 sub_G.add_edge(f"p_{p['p_id']}", f"m_{m['id']}", capacity=1, weight=final_cost, reason=reason)
-                                        
+                                            
                                         try:
                                             sub_flow = nx.min_cost_flow(sub_G)
                                             for p in assigned_pnms:
@@ -860,7 +867,7 @@ else:
                                                 reason = ", ".join(shared) if shared else "Rotation"
                                                 if is_repeat: reason += " (Repeat)"
                                                 candidates.append((final_score, p, m, reason, is_repeat))
-                                        
+                                            
                                         candidates.sort(key=lambda x: x[0], reverse=True)
                                         
                                         round_pnm_done, round_mem_done = set(), set()
@@ -952,13 +959,13 @@ else:
                             
                             zf.writestr(f"Party_{party}_Match_Analysis.xlsx", output.getvalue())
 
-            progress_bar.empty()
-            status_text.empty()
-            st.success("Matching Complete!")
-            
-            st.download_button(
-                label="Download All Matches (ZIP)",
-                data=zip_buffer.getvalue(),
-                file_name="recruitment_matches.zip",
-                mime="application/zip"
-            )
+                    progress_bar.empty()
+                    status_text.empty()
+                    st.success("Matching Complete!")
+                    
+                    st.download_button(
+                        label="Download All Matches (ZIP)",
+                        data=zip_buffer.getvalue(),
+                        file_name="recruitment_matches.zip",
+                        mime="application/zip"
+                    )
