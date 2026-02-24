@@ -219,6 +219,12 @@ def batch_update_team_rankings(rankings_map):
         st.error(f"Batch update failed: {e}")
         return 0
 
+def auto_adjust_columns(writer, sheet_name, df):
+    worksheet = writer.sheets[sheet_name]
+    for idx, col in enumerate(df.columns):
+        max_len = max(df[col].astype(str).map(len).max(), len(str(col))) + 2
+        worksheet.set_column(idx, idx, max_len)
+
 # --- MATCHING ALGORITHM HELPERS ---
 def get_coords_offline(hometown_str, city_coords_map, all_city_keys):
     if not isinstance(hometown_str, str): return None, None
@@ -825,5 +831,128 @@ else:
                                                         if flow > 0 and tgt != sub_t:
                                                             m_id_ex = int(tgt.replace("m_", ""))
                                                             m_name = next((m['name'] for m in valid_members if m['id'] == m_id_ex), "Unknown")
-                                        except:
-                                            pass
+                                                            edge_d = sub_G.get_edge_data(p_node, tgt)
+                                                            calc_cost = (edge_d.get('weight', 10000) - (50000 if edge_d.get('weight',0) > 40000 else 0)) / 10000.0
+                                                            rotation_output.append({
+                                                                'Round': round_num, 'Team ID': t_idx, 'Team Members': team_data['joined_names'],
+                                                                'PNM ID': p['p_id'], 'PNM Name': p['p_name'], 'Matched Member': m_name,
+                                                                'Match Cost': round(calc_cost, 4), 'Reason': f"Common: {edge_d.get('reason')}"
+                                                            })
+                                                            history.add((p['p_id'], m_id_ex))
+                                        except nx.NetworkXUnfeasible:
+                                            rotation_output.append({'Round': round_num, 'Team ID': t_idx, 'PNM Name': "FLOW FAIL", 'Reason': "Unfeasible"})
+                                    
+                                    elif method == 'greedy':
+                                        candidates = []
+                                        for p in assigned_pnms:
+                                            for m in active_members:
+                                                is_repeat = (p['p_id'], m['id']) in history
+                                                if is_repeat and not must_allow_repeats: continue
+                                                m_attrs = member_attr_cache.get(m['id'], set())
+                                                shared = p['p_attrs'].intersection(m_attrs)
+                                                score = sum(trait_weights.get(t, 1.0) for t in shared)
+                                                final_score = score - 1000 if is_repeat else score
+                                                reason = ", ".join(shared) if shared else "Rotation"
+                                                if is_repeat: reason += " (Repeat)"
+                                                candidates.append((final_score, p, m, reason, is_repeat))
+                                        
+                                        candidates.sort(key=lambda x: x[0], reverse=True)
+                                        
+                                        round_pnm_done, round_mem_done = set(), set()
+                                        for sc, p, m, rs, is_rep in candidates:
+                                            if p['p_id'] not in round_pnm_done and m['id'] not in round_mem_done:
+                                                real_score = sc + 1000 if is_rep else sc
+                                                rotation_output.append({
+                                                    'Round': round_num, 'Team ID': t_idx, 'Team Members': team_data['joined_names'],
+                                                    'PNM ID': p['p_id'], 'PNM Name': p['p_name'], 'Matched Member': m['name'],
+                                                    'Match Cost': round(1.0/(1.0+real_score), 4), 'Reason': f"Common: {rs}" if real_score > 0 else "Greedy Fill"
+                                                })
+                                                round_pnm_done.add(p['p_id']); round_mem_done.add(m['id']); history.add((p['p_id'], m['id']))
+                            return rotation_output
+
+                        internal_flow_results = run_internal_rotation(assignments_map_flow, method='flow')
+                        internal_greedy_results = run_internal_rotation(assignments_map_greedy, method='greedy')
+
+                        # --- PHASE C: BUMP INSTRUCTIONS ---
+                        def generate_bump_instructions(rotation_data):
+                            if not rotation_data: return []
+                            df = pd.DataFrame(rotation_data)
+                            if df.empty or 'Matched Member' not in df.columns: return []
+                            df = df.sort_values(by=['Team ID', 'PNM ID', 'Round'])
+                            df['Person_To_Bump'] = df.groupby(['Team ID', 'PNM ID'])['Matched Member'].shift(1)
+                            instructions = df[df['Person_To_Bump'].notna()].copy()
+                            instructions['At End Of Round'] = instructions['Round'] - 1
+                            output = instructions[['Matched Member', 'At End Of Round', 'Person_To_Bump', 'PNM Name']].rename(columns={
+                                'Matched Member': 'Member (You)', 'Person_To_Bump': 'Go Bump This Person', 'PNM Name': 'Who is with PNM'
+                            })
+                            return output.sort_values(by=['Member (You)', 'At End Of Round']).to_dict('records')
+
+                        bump_instruct_flow = generate_bump_instructions(internal_flow_results)
+                        bump_instruct_greedy = generate_bump_instructions(internal_greedy_results)
+
+                        # --- EXPORT TO EXCEL ---
+                        if global_flow_results:
+                            output = BytesIO()
+                            df_glob_flow = pd.DataFrame(global_flow_results)
+                            df_glob_greedy = pd.DataFrame(global_greedy_results)
+                            df_rot_flow = pd.DataFrame(internal_flow_results)
+                            df_rot_greedy = pd.DataFrame(internal_greedy_results)
+                            df_bump_flow = pd.DataFrame(bump_instruct_flow)
+                            df_bump_greedy = pd.DataFrame(bump_instruct_greedy)
+
+                            # --- SUMMARY CALCULATION ---
+                            flow_costs = df_glob_flow['Match Cost'].dropna()
+                            greedy_costs = df_glob_greedy['Match Cost'].dropna()
+
+                            summary_data = {
+                                'Metric': ['Total Cost', 'Average Cost', 'Min Cost', 'Max Cost', 'Std Dev'],
+                                'Global Network Flow': [
+                                    round(flow_costs.sum(), 4),
+                                    round(flow_costs.mean(), 4) if not flow_costs.empty else 0,
+                                    round(flow_costs.min(), 4) if not flow_costs.empty else 0,
+                                    round(flow_costs.max(), 4) if not flow_costs.empty else 0,
+                                    round(flow_costs.std(), 4) if len(flow_costs) > 1 else 0
+                                ],
+                                'Global Greedy': [
+                                    round(greedy_costs.sum(), 4),
+                                    round(greedy_costs.mean(), 4) if not greedy_costs.empty else 0,
+                                    round(greedy_costs.min(), 4) if not greedy_costs.empty else 0,
+                                    round(greedy_costs.max(), 4) if not greedy_costs.empty else 0,
+                                    round(greedy_costs.std(), 4) if len(greedy_costs) > 1 else 0
+                                ]
+                            }
+                            summary_df = pd.DataFrame(summary_data)
+
+                            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                                summary_df.to_excel(writer, sheet_name="Summary_Comparison", index=False); auto_adjust_columns(writer, "Summary_Comparison", summary_df)
+                                df_glob_flow.to_excel(writer, sheet_name="Global_Matches_Flow", index=False); auto_adjust_columns(writer, "Global_Matches_Flow", df_glob_flow)
+                                df_glob_greedy.to_excel(writer, sheet_name="Global_Matches_Greedy", index=False); auto_adjust_columns(writer, "Global_Matches_Greedy", df_glob_greedy)
+                                
+                                if not df_rot_flow.empty:
+                                    if is_bump_order_set == "n":
+                                        df_rot_flow.to_excel(writer, sheet_name="Rotation_Flow", index=False); auto_adjust_columns(writer, "Rotation_Flow", df_rot_flow)
+                                        if not df_bump_flow.empty: df_bump_flow.to_excel(writer, sheet_name="Bump_Logistics_Flow", index=False); auto_adjust_columns(writer, "Bump_Logistics_Flow", df_bump_flow)
+                                    else:
+                                        r1 = df_rot_flow[df_rot_flow['Round'] == 1].drop(columns=['Team ID', 'Round'], errors='ignore')
+                                        r1.to_excel(writer, sheet_name="Round_1_Matches_Flow", index=False); auto_adjust_columns(writer, "Round_1_Matches_Flow", r1)
+                                
+                                if not df_rot_greedy.empty:
+                                    if is_bump_order_set == "n":
+                                        df_rot_greedy.to_excel(writer, sheet_name="Rotation_Greedy", index=False); auto_adjust_columns(writer, "Rotation_Greedy", df_rot_greedy)
+                                        if not df_bump_greedy.empty: df_bump_greedy.to_excel(writer, sheet_name="Bump_Logistics_Greedy", index=False); auto_adjust_columns(writer, "Bump_Logistics_Greedy", df_bump_greedy)
+                                    else:
+                                        r1 = df_rot_greedy[df_rot_greedy['Round'] == 1].drop(columns=['Team ID', 'Round'], errors='ignore')
+                                        r1.to_excel(writer, sheet_name="Round_1_Matches_Greedy", index=False); auto_adjust_columns(writer, "Round_1_Matches_Greedy", r1)
+                            
+                            zf.writestr(f"Party_{party}_Match_Analysis.xlsx", output.getvalue())
+
+            progress_bar.empty()
+            status_text.empty()
+            st.success("Matching Complete!")
+            
+            st.download_button(
+                label="Download All Matches (ZIP)",
+                data=zip_buffer.getvalue(),
+                file_name="recruitment_matches.zip",
+                mime="application/zip"
+            )
