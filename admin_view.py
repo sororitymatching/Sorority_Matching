@@ -447,7 +447,7 @@ else:
     with tab7:
         st.header("Run Matching Algorithm")
         
-        st.subheader("2. Settings")
+        st.subheader("Matching Algorithm Settings")
         try:
             setting_parties = get_setting_value('B1')
             num_parties = int(setting_parties) if setting_parties and str(setting_parties).isdigit() else 4
