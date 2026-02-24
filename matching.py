@@ -5,6 +5,7 @@ import networkx as nx
 import re
 import difflib
 import zipfile
+import gspread
 from io import BytesIO
 from math import radians
 from sentence_transformers import SentenceTransformer
@@ -14,7 +15,7 @@ from sklearn.metrics.pairwise import haversine_distances
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Sorority Recruitment Matcher", layout="wide")
 st.title("🧩 Sorority Recruitment Matching System")
-st.markdown("Upload your recruitment data CSVs below to generate optimal Bump Team matches.")
+st.markdown("This app connects to the **OverallMatchingInformation** Google Sheet to generate matches.")
 
 # --- CACHED RESOURCES ---
 @st.cache_resource
@@ -35,6 +36,48 @@ def load_city_database():
     except Exception as e:
         st.error(f"Failed to load city database: {e}")
         return {}, []
+
+@st.cache_data(ttl=600)  # Cache data for 10 minutes to avoid hitting API limits
+def load_google_sheet_data(sheet_name):
+    """
+    Loads data from Google Sheets using gspread and st.secrets.
+    """
+    try:
+        # Authenticate using secrets
+        if "gcp_service_account" not in st.secrets:
+            st.error("❌ Google Credentials not found in st.secrets.")
+            return None, None, None, None, None
+
+        gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
+        sh = gc.open(sheet_name)
+
+        # Helper to get DataFrame from worksheet
+        def get_df(ws_name):
+            try:
+                ws = sh.worksheet(ws_name)
+                # Get all values as list of lists
+                data = ws.get_all_values()
+                if not data:
+                    return pd.DataFrame()
+                # Create DataFrame, assuming first row is header
+                df = pd.DataFrame(data[1:], columns=data[0])
+                return df
+            except gspread.WorksheetNotFound:
+                st.error(f"Worksheet '{ws_name}' not found in the spreadsheet.")
+                return None
+
+        # Load specific sheets
+        bump_teams = get_df("Bump Teams")
+        party_excuses = get_df("Party Excuses")
+        pnm_info = get_df("PNM Information")
+        mem_info = get_df("Member Information")
+        prior_conn = get_df("Prior Connections")
+
+        return bump_teams, party_excuses, pnm_info, mem_info, prior_conn
+
+    except Exception as e:
+        st.error(f"An error occurred connecting to Google Sheets: {e}")
+        return None, None, None, None, None
 
 # --- HELPER FUNCTIONS ---
 def auto_adjust_columns(writer, sheet_name, df):
@@ -63,15 +106,15 @@ def get_year_tag(year_val):
     matches = difflib.get_close_matches(raw, valid_years, n=1, cutoff=0.6)
     return matches[0] if matches else raw.title()
 
-# --- SIDEBAR: INPUTS ---
-st.sidebar.header("1. Upload Data")
-file_bump = st.sidebar.file_uploader("Bump Teams (CSV)", type="csv")
-file_excuses = st.sidebar.file_uploader("Party Excuses (CSV)", type="csv")
-file_pnm = st.sidebar.file_uploader("PNM Information (CSV)", type="csv")
-file_member = st.sidebar.file_uploader("Member Information (CSV)", type="csv")
-file_nomatch = st.sidebar.file_uploader("Prior Connections (CSV)", type="csv")
+# --- SIDEBAR: CONFIGURATION ---
+st.sidebar.header("1. Configuration")
+sheet_name_input = st.sidebar.text_input("Google Sheet Name", value="OverallMatchingInformation")
+refresh_data = st.sidebar.button("Refresh Data from Google Sheets")
 
-st.sidebar.header("2. Configuration")
+if refresh_data:
+    load_google_sheet_data.clear()
+
+st.sidebar.header("2. Settings")
 num_parties = st.sidebar.number_input("Total Number of Parties", min_value=1, value=37)
 pnms_to_process = st.sidebar.number_input("Number of PNMs to Process (Slice)", min_value=1, value=1665)
 pnms_per_party = st.sidebar.number_input("PNMs Per Party", min_value=1, value=45)
@@ -84,24 +127,21 @@ run_button = st.sidebar.button("Run Matching Algorithm", type="primary")
 
 # --- MAIN LOGIC ---
 if run_button:
-    if not all([file_bump, file_excuses, file_pnm, file_member, file_nomatch]):
-        st.error("Please upload all 5 required CSV files.")
-    else:
-        with st.spinner("Initializing Models & Data..."):
-            # Load Data
-            bump_teams = pd.read_csv(file_bump)
-            party_excuses = pd.read_csv(file_excuses)
-            pnm_intial_interest = pd.read_csv(file_pnm)
-            member_interest = pd.read_csv(file_member)
-            member_pnm_no_match = pd.read_csv(file_nomatch)
+    with st.spinner("Connecting to Google Sheets & Loading Data..."):
+        # Load Data from Google Sheets
+        bump_teams, party_excuses, pnm_intial_interest, member_interest, member_pnm_no_match = load_google_sheet_data(sheet_name_input)
 
-            # Clean Columns
-            for df in [bump_teams, party_excuses, pnm_intial_interest, member_interest, member_pnm_no_match]:
-                df.columns = df.columns.str.strip()
-
-            # Load Resources
-            model = load_model()
-            city_coords_map, all_city_keys = load_city_database()
+    if any(df is None for df in [bump_teams, party_excuses, pnm_intial_interest, member_interest, member_pnm_no_match]):
+        st.stop() # Error messages handled in load function
+    
+    with st.spinner("Initializing Models & Processing Data..."):
+        # Clean Columns
+        for df in [bump_teams, party_excuses, pnm_intial_interest, member_interest, member_pnm_no_match]:
+            df.columns = df.columns.str.strip()
+        
+        # Load NLP & Geo Resources
+        model = load_model()
+        city_coords_map, all_city_keys = load_city_database()
 
         # --- STEP 1: PARTY ASSIGNMENT & CLUSTERING ---
         with st.status("Preprocessing & Clustering...", expanded=True) as status:
@@ -230,6 +270,15 @@ if run_button:
         trait_weights = (len(member_interest) / trait_freq).to_dict()
         strength_bonus_map = {1: 1.5, 2: 1.0, 3: 0.5, 4: 0.0}
 
+        # Conversion helper for strings from GSheet
+        def to_float(val, default=1.0):
+            try: return float(val)
+            except: return default
+        
+        def to_int(val, default=4):
+            try: return int(val)
+            except: return default
+
         with zipfile.ZipFile(zip_buffer, "w") as zf:
             for party in range(1, int(num_parties) + 1):
                 progress_bar.progress(party / num_parties)
@@ -243,7 +292,7 @@ if run_button:
 
                 for i, row in enumerate(pnm_records):
                     p_attrs = set(str(row['attributes_for_matching']).split(', '))
-                    p_rank = row.get("Average Recruit Rank", 1.0)
+                    p_rank = to_float(row.get("Average Recruit Rank", 1.0))
                     pnm_list.append({
                         'idx': i, 'id': row['PNM ID'], 'name': row.get('PNM Name', row.get('Full Name')),
                         'attrs': p_attrs, 'rank': p_rank, 'bonus': 0.75 * (p_rank - 1), 'node_id': f"p_{i}"
@@ -266,7 +315,7 @@ if run_button:
                     if missing_members:
                         broken_teams_list.append({'members': current_members, 'missing': missing_members})
                     else:
-                        t_rank = row.get("Ranking", 4)
+                        t_rank = to_int(row.get("Ranking", 4))
                         team_list.append({
                             't_idx': len(team_list), 'members': current_members, 'team_size': len(current_members),
                             'member_ids': [name_to_id_map.get(m) for m in current_members],
@@ -276,9 +325,7 @@ if run_button:
 
                 # --- Capacity Checks ---
                 total_capacity = len(team_list) * matches_per_team
-                if total_capacity < len(pnm_list):
-                    pass 
-
+                
                 potential_pairs = []
                 for p_data in pnm_list:
                     for t_data in team_list:
@@ -537,10 +584,7 @@ if run_button:
                     summary_df = pd.DataFrame(summary_data)
 
                     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                        # Write Summary Sheet first
                         summary_df.to_excel(writer, sheet_name="Summary_Comparison", index=False); auto_adjust_columns(writer, "Summary_Comparison", summary_df)
-                        
-                        # Write Global Sheets
                         df_glob_flow.to_excel(writer, sheet_name="Global_Matches_Flow", index=False); auto_adjust_columns(writer, "Global_Matches_Flow", df_glob_flow)
                         df_glob_greedy.to_excel(writer, sheet_name="Global_Matches_Greedy", index=False); auto_adjust_columns(writer, "Global_Matches_Greedy", df_glob_greedy)
                         
