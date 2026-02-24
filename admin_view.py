@@ -1001,19 +1001,31 @@ else:
                                 
                                 if not df_rot_flow.empty:
                                     if is_bump_order_set == "n":
-                                        df_rot_flow.to_excel(writer, sheet_name="Rotation_Flow", index=False); auto_adjust_columns(writer, "Rotation_Flow", df_rot_flow)
+                                        # MODIFIED: Drop 'Team ID' for Rotation Flow export
+                                        rot_flow_out = df_rot_flow.drop(columns=['Team ID'], errors='ignore')
+                                        rot_flow_out.to_excel(writer, sheet_name="Rotation_Flow", index=False)
+                                        auto_adjust_columns(writer, "Rotation_Flow", rot_flow_out)
+                                        
                                         if not df_bump_flow.empty: df_bump_flow.to_excel(writer, sheet_name="Bump_Logistics_Flow", index=False); auto_adjust_columns(writer, "Bump_Logistics_Flow", df_bump_flow)
                                     else:
+                                        # MODIFIED: Drop 'Team ID' (and Round) for Round 1 Matches
                                         r1 = df_rot_flow[df_rot_flow['Round'] == 1].drop(columns=['Team ID', 'Round'], errors='ignore')
-                                        r1.to_excel(writer, sheet_name="Round_1_Matches_Flow", index=False); auto_adjust_columns(writer, "Round_1_Matches_Flow", r1)
+                                        r1.to_excel(writer, sheet_name="Round_1_Matches_Flow", index=False)
+                                        auto_adjust_columns(writer, "Round_1_Matches_Flow", r1)
                                 
                                 if not df_rot_greedy.empty:
                                     if is_bump_order_set == "n":
-                                        df_rot_greedy.to_excel(writer, sheet_name="Rotation_Greedy", index=False); auto_adjust_columns(writer, "Rotation_Greedy", df_rot_greedy)
+                                        # MODIFIED: Drop 'Team ID' for Rotation Greedy export
+                                        rot_greedy_out = df_rot_greedy.drop(columns=['Team ID'], errors='ignore')
+                                        rot_greedy_out.to_excel(writer, sheet_name="Rotation_Greedy", index=False)
+                                        auto_adjust_columns(writer, "Rotation_Greedy", rot_greedy_out)
+                                        
                                         if not df_bump_greedy.empty: df_bump_greedy.to_excel(writer, sheet_name="Bump_Logistics_Greedy", index=False); auto_adjust_columns(writer, "Bump_Logistics_Greedy", df_bump_greedy)
                                     else:
+                                        # MODIFIED: Drop 'Team ID' (and Round) for Round 1 Matches
                                         r1 = df_rot_greedy[df_rot_greedy['Round'] == 1].drop(columns=['Team ID', 'Round'], errors='ignore')
-                                        r1.to_excel(writer, sheet_name="Round_1_Matches_Greedy", index=False); auto_adjust_columns(writer, "Round_1_Matches_Greedy", r1)
+                                        r1.to_excel(writer, sheet_name="Round_1_Matches_Greedy", index=False)
+                                        auto_adjust_columns(writer, "Round_1_Matches_Greedy", r1)
                             
                             zf.writestr(f"Party_{party}_Match_Analysis.xlsx", output.getvalue())
 
