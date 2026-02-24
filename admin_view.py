@@ -446,15 +446,28 @@ else:
     # --- TAB 7: RUN MATCHING ---
     with tab7:
         st.header("Run Matching Algorithm")
-        
-        st.subheader("Matching Settings")
-        num_parties = st.number_input("Total Number of Parties", min_value=1, value=37)
-        pnms_to_process = st.number_input("Number of PNMs to Process (Slice)", min_value=1, value=1665)
-        pnms_per_party = st.number_input("PNMs Per Party", min_value=1, value=45)
-        matches_per_team = st.number_input("Matches per Bump Team (Capacity)", min_value=1, value=2)
-        num_rounds = st.number_input("Rounds per Party", min_value=1, value=4)
-        bump_order_set = st.radio("Is Bump Order Set?", ("Yes", "No"), horizontal=True)
-        is_bump_order_set = "y" if bump_order_set == "Yes" else "n"
+
+        # Create two columns for better layout in the main area
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.subheader("1. Source Data")
+            # Removed User Input, replaced with static info
+            st.info(f"Using Google Sheet: **{SHEET_NAME}**")
+            
+            if st.button("Refresh Data from Google Sheets"):
+                load_google_sheet_data.clear()
+                st.toast("Data cache cleared!")
+
+        with col2:
+            st.subheader("2. Settings")
+            num_parties = st.number_input("Total Number of Parties", min_value=1, value=37)
+            # Removed the "Number of PNMs to Process" slicing input
+            pnms_per_party = st.number_input("PNMs Per Party", min_value=1, value=45)
+            matches_per_team = st.number_input("Matches per Bump Team (Capacity)", min_value=1, value=2)
+            num_rounds = st.number_input("Rounds per Party", min_value=1, value=4)
+            bump_order_set = st.radio("Is Bump Order Set?", ("Yes", "No"), horizontal=True)
+            is_bump_order_set = "y" if bump_order_set == "Yes" else "n"
 
         st.divider()
         run_button = st.button("Run Matching Algorithm", type="primary", use_container_width=True)
@@ -468,6 +481,20 @@ else:
             if any(df is None for df in [bump_teams, party_excuses, pnm_intial_interest, member_interest, member_pnm_no_match]):
                 st.stop() # Error messages handled in load function
             
+            # --- VALIDATION CHECK: CAPACITY ---
+            total_pnms_in_dataset = len(pnm_intial_interest)
+            total_slots = num_parties * pnms_per_party
+            
+            if total_pnms_in_dataset > total_slots:
+                st.error(
+                    f"❌ **Not enough spots!**\n\n"
+                    f"You have **{total_pnms_in_dataset}** PNMs in your database, but only **{total_slots}** available spots "
+                    f"({num_parties} parties × {pnms_per_party} PNMs/party).\n\n"
+                    f"Please increase the number of parties or the number of PNMs per party to accommodate everyone."
+                )
+                st.stop()
+            # ----------------------------------
+
             with st.spinner("Initializing Models & Processing Data..."):
                 # Clean Columns
                 for df in [bump_teams, party_excuses, pnm_intial_interest, member_interest, member_pnm_no_match]:
@@ -480,7 +507,10 @@ else:
                 # --- STEP 1: PARTY ASSIGNMENT & CLUSTERING ---
                 with st.status("Preprocessing & Clustering...", expanded=True) as status:
                     st.write("Assigning Parties...")
-                    pnm_intial_interest = pnm_intial_interest.iloc[0:pnms_to_process].copy()
+                    # REMOVED SLICING: Now using full dataframe
+                    # pnm_intial_interest = pnm_intial_interest.iloc[0:pnms_to_process].copy() 
+                    pnm_intial_interest = pnm_intial_interest.copy()
+
                     party_assignments = np.tile(np.arange(1, num_parties + 1), int(pnms_per_party))
                     
                     if len(party_assignments) != len(pnm_intial_interest):
