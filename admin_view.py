@@ -626,7 +626,8 @@ else:
                     try: return int(val)
                     except: return default
 
-                with zipfile.ZipFile(zip_buffer, "w") as zf:
+                # === FIX START: Added compression and ensure download is OUTSIDE the 'with' block ===
+                with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
                     for party in range(1, int(num_parties) + 1):
                         progress_bar.progress(party / num_parties)
                         status_text.text(f"Processing Party {party}...")
@@ -960,13 +961,14 @@ else:
                             
                             zf.writestr(f"Party_{party}_Match_Analysis.xlsx", output.getvalue())
 
-                    progress_bar.empty()
-                    status_text.empty()
-                    st.success("Matching Complete!")
-                    
-                    st.download_button(
-                        label="Download All Matches (ZIP)",
-                        data=zip_buffer.getvalue(),
-                        file_name="recruitment_matches.zip",
-                        mime="application/zip"
-                    )
+                # === FIX END: Now we are OUTSIDE the 'with' block, so the zip is finalized ===
+                progress_bar.empty()
+                status_text.empty()
+                st.success("Matching Complete!")
+                
+                st.download_button(
+                    label="Download All Matches (ZIP)",
+                    data=zip_buffer.getvalue(),
+                    file_name="recruitment_matches.zip",
+                    mime="application/zip"
+                )
