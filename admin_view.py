@@ -286,6 +286,10 @@ def get_year_tag(year_val):
 st.set_page_config(page_title="Admin Dashboard", layout="wide")
 st.title("Sorority Admin Dashboard")
 
+# Initialize Session State for Results
+if "match_results" not in st.session_state:
+    st.session_state.match_results = None
+
 if "authenticated" not in st.session_state: st.session_state.authenticated = False
 
 if not st.session_state.authenticated:
@@ -1044,23 +1048,35 @@ else:
                 # === FIX END: Now we are OUTSIDE the 'with' block, so the zip is finalized ===
                 progress_bar.empty()
                 status_text.empty()
+                
+                # Save to Session State for Persistence
+                st.session_state.match_results = {
+                    "zip_data": zip_buffer.getvalue(),
+                    "individual_files": individual_party_files
+                }
+                
                 st.success("Matching Complete!")
-                
-                # 1. Main ZIP Download
+        
+        # --- DISPLAY DOWNLOAD BUTTONS (PERSISTENT) ---
+        if st.session_state.match_results:
+            st.divider()
+            st.subheader("Download Results")
+            
+            # 1. Main ZIP Download
+            st.download_button(
+                label="Download All Matches (ZIP)",
+                data=st.session_state.match_results["zip_data"],
+                file_name="recruitment_matches.zip",
+                mime="application/zip"
+            )
+            
+            # 2. Individual Downloads
+            st.write("### Individual Party Sheets")
+            for label, fname, data in st.session_state.match_results["individual_files"]:
                 st.download_button(
-                    label="Download All Matches (ZIP)",
-                    data=zip_buffer.getvalue(),
-                    file_name="recruitment_matches.zip",
-                    mime="application/zip"
+                    label=f"Download {label}",
+                    data=data,
+                    file_name=fname,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"dl_btn_{fname}"
                 )
-                
-                # 2. Individual Downloads
-                st.write("### Individual Party Downloads")
-                for label, fname, data in individual_party_files:
-                    st.download_button(
-                        label=f"📥 Download {label} Excel",
-                        data=data,
-                        file_name=fname,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key=f"dl_btn_{fname}"
-                    )
