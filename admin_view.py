@@ -452,7 +452,8 @@ else:
 
         with col1:
             st.subheader("1. Source Data")
-            sheet_name_input = st.text_input("Google Sheet Name", value="OverallMatchingInformation")
+            # Removed User Input, replaced with static info
+            st.info(f"Using Google Sheet: **{SHEET_NAME}**")
             
             if st.button("Refresh Data from Google Sheets"):
                 load_google_sheet_data.clear()
@@ -474,8 +475,8 @@ else:
         # --- MAIN LOGIC ---
         if run_button:
             with st.spinner("Connecting to Google Sheets & Loading Data..."):
-                # Load Data from Google Sheets
-                bump_teams, party_excuses, pnm_intial_interest, member_interest, member_pnm_no_match = load_google_sheet_data(sheet_name_input)
+                # Load Data from Google Sheets (Hardcoded SHEET_NAME)
+                bump_teams, party_excuses, pnm_intial_interest, member_interest, member_pnm_no_match = load_google_sheet_data(SHEET_NAME)
 
             if any(df is None for df in [bump_teams, party_excuses, pnm_intial_interest, member_interest, member_pnm_no_match]):
                 st.stop() # Error messages handled in load function
