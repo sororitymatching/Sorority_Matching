@@ -811,7 +811,8 @@ else:
 
                                         for p in assigned_pnms:
                                             for m in active_members:
-                                                is_repeat = (p['p_id'], m['id']) in history
+                                                # Ensure string comparison for history check
+                                                is_repeat = (str(p['p_id']), str(m['id'])) in history
                                                 if is_repeat and not must_allow_repeats: continue
                                                 m_attrs = member_attr_cache.get(m['id'], set())
                                                 shared = p['p_attrs'].intersection(m_attrs)
@@ -829,16 +830,20 @@ else:
                                                 if p_node in sub_flow:
                                                     for tgt, flow in sub_flow[p_node].items():
                                                         if flow > 0 and tgt != sub_t:
-                                                            m_id_ex = int(tgt.replace("m_", ""))
-                                                            m_name = next((m['name'] for m in valid_members if m['id'] == m_id_ex), "Unknown")
+                                                            # Fix: Keep ID as string to match Google Sheets data format
+                                                            raw_id = tgt.replace("m_", "")
+                                                            m_name = next((m['name'] for m in valid_members if str(m['id']) == raw_id), "Unknown")
+                                                            
                                                             edge_d = sub_G.get_edge_data(p_node, tgt)
                                                             calc_cost = (edge_d.get('weight', 10000) - (50000 if edge_d.get('weight',0) > 40000 else 0)) / 10000.0
+                                                            
                                                             rotation_output.append({
                                                                 'Round': round_num, 'Team ID': t_idx, 'Team Members': team_data['joined_names'],
                                                                 'PNM ID': p['p_id'], 'PNM Name': p['p_name'], 'Matched Member': m_name,
                                                                 'Match Cost': round(calc_cost, 4), 'Reason': f"Common: {edge_d.get('reason')}"
                                                             })
-                                                            history.add((p['p_id'], m_id_ex))
+                                                            # Add to history as strings
+                                                            history.add((str(p['p_id']), str(raw_id)))
                                         except nx.NetworkXUnfeasible:
                                             rotation_output.append({'Round': round_num, 'Team ID': t_idx, 'PNM Name': "FLOW FAIL", 'Reason': "Unfeasible"})
                                     
@@ -846,7 +851,7 @@ else:
                                         candidates = []
                                         for p in assigned_pnms:
                                             for m in active_members:
-                                                is_repeat = (p['p_id'], m['id']) in history
+                                                is_repeat = (str(p['p_id']), str(m['id'])) in history
                                                 if is_repeat and not must_allow_repeats: continue
                                                 m_attrs = member_attr_cache.get(m['id'], set())
                                                 shared = p['p_attrs'].intersection(m_attrs)
@@ -867,7 +872,8 @@ else:
                                                     'PNM ID': p['p_id'], 'PNM Name': p['p_name'], 'Matched Member': m['name'],
                                                     'Match Cost': round(1.0/(1.0+real_score), 4), 'Reason': f"Common: {rs}" if real_score > 0 else "Greedy Fill"
                                                 })
-                                                round_pnm_done.add(p['p_id']); round_mem_done.add(m['id']); history.add((p['p_id'], m['id']))
+                                                round_pnm_done.add(p['p_id']); round_mem_done.add(m['id'])
+                                                history.add((str(p['p_id']), str(m['id'])))
                             return rotation_output
 
                         internal_flow_results = run_internal_rotation(assignments_map_flow, method='flow')
