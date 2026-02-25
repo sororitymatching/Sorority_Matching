@@ -516,29 +516,27 @@ else:
 
         # --- MAIN LOGIC ---
         if run_button:
-            with st.spinner("Connecting to Google Sheets & Loading Data..."):
-                # Load Data from Google Sheets (Hardcoded SHEET_NAME)
-                # This uses the CACHED function now
+            with st.spinner("Processing matches..."):
+                # Load Data from Google Sheets
                 bump_teams, party_excuses, pnm_intial_interest, member_interest, member_pnm_no_match = load_google_sheet_data(SHEET_NAME)
 
-            if any(df is None for df in [bump_teams, party_excuses, pnm_intial_interest, member_interest, member_pnm_no_match]):
-                st.stop() # Error messages handled in load function
-            
-            # --- VALIDATION CHECK: CAPACITY ---
-            total_pnms_in_dataset = len(pnm_intial_interest)
-            total_slots = num_parties * pnms_per_party
-            
-            if total_pnms_in_dataset > total_slots:
-                st.error(
-                    f"❌ **Not enough spots!**\n\n"
-                    f"You have **{total_pnms_in_dataset}** PNMs in your database, but only **{total_slots}** available spots "
-                    f"({num_parties} parties × {pnms_per_party} PNMs/party).\n\n"
-                    f"Please increase the number of parties or the number of PNMs per party to accommodate everyone."
-                )
-                st.stop()
-            # ----------------------------------
+                if any(df is None for df in [bump_teams, party_excuses, pnm_intial_interest, member_interest, member_pnm_no_match]):
+                    st.stop()
+                
+                # --- VALIDATION CHECK: CAPACITY ---
+                total_pnms_in_dataset = len(pnm_intial_interest)
+                total_slots = num_parties * pnms_per_party
+                
+                if total_pnms_in_dataset > total_slots:
+                    st.error(
+                        f"❌ **Not enough spots!**\n\n"
+                        f"You have **{total_pnms_in_dataset}** PNMs in your database, but only **{total_slots}** available spots "
+                        f"({num_parties} parties × {pnms_per_party} PNMs/party).\n\n"
+                        f"Please increase the number of parties or the number of PNMs per party to accommodate everyone."
+                    )
+                    st.stop()
+                # ----------------------------------
 
-            with st.spinner("Initializing Models & Processing Data..."):
                 # Clean Columns
                 for df in [bump_teams, party_excuses, pnm_intial_interest, member_interest, member_pnm_no_match]:
                     df.columns = df.columns.str.strip()
@@ -548,106 +546,99 @@ else:
                 city_coords_map, all_city_keys = load_city_database()
 
                 # --- STEP 1: PARTY ASSIGNMENT & CLUSTERING ---
-                with st.status("Preprocessing & Clustering...", expanded=True) as status:
-                    st.write("Assigning Parties...")
-                    # REMOVED SLICING: Now using full dataframe
-                    # pnm_intial_interest = pnm_intial_interest.iloc[0:pnms_to_process].copy() 
-                    pnm_intial_interest = pnm_intial_interest.copy()
+                # REMOVED SLICING: Now using full dataframe
+                pnm_intial_interest = pnm_intial_interest.copy()
 
-                    party_assignments = np.tile(np.arange(1, num_parties + 1), int(pnms_per_party))
-                    
-                    if len(party_assignments) != len(pnm_intial_interest):
-                        diff = len(pnm_intial_interest) - len(party_assignments)
-                        if diff > 0: party_assignments = np.concatenate([party_assignments, np.arange(1, diff+1)])
-                        else: party_assignments = party_assignments[:len(pnm_intial_interest)]
+                party_assignments = np.tile(np.arange(1, num_parties + 1), int(pnms_per_party))
+                
+                if len(party_assignments) != len(pnm_intial_interest):
+                    diff = len(pnm_intial_interest) - len(party_assignments)
+                    if diff > 0: party_assignments = np.concatenate([party_assignments, np.arange(1, diff+1)])
+                    else: party_assignments = party_assignments[:len(pnm_intial_interest)]
 
-                    np.random.seed(42)
-                    np.random.shuffle(party_assignments)
-                    pnm_intial_interest['Party'] = party_assignments
+                np.random.seed(42)
+                np.random.shuffle(party_assignments)
+                pnm_intial_interest['Party'] = party_assignments
 
-                    st.write("Geocoding & Analyzing Interests...")
-                    # Standardize PNM Columns
-                    pnm_col_map = {
-                        'PNM Name': 'Full Name', 'Enter your hometown in the form City, State:': 'Hometown',
-                        'Enter your major or "Undecided":': 'Major', 'Enter your minor or leave blank:': 'Minor',
-                        'Enter your high school involvement (sports, clubs etc.), separate each activity by a comma:': 'High School Involvement',
-                        'Enter your college involvement (sports, clubs etc.), separate each activity by a comma:': 'College Involvement',
-                        'Enter your hobbies and interests, separate each activity by a comma:': 'Hobbies',
-                        'Pick your year in school:': 'Year'
-                    }
-                    pnm_clean = pnm_intial_interest.rename(columns=pnm_col_map)
-                    df_mem = member_interest.copy()
-                    
-                    # --- CLUSTERING LOGIC ---
-                    all_coords, geo_tracker = [], []
-                    for idx, row in df_mem.iterrows():
-                        lat, lon = get_coords_offline(row.get('Hometown'), city_coords_map, all_city_keys)
-                        if lat: 
-                            all_coords.append([radians(lat), radians(lon)])
-                            geo_tracker.append({'type': 'mem', 'id': row['Sorority ID'], 'hometown': row['Hometown']})
-                    for idx, row in pnm_clean.iterrows():
-                        lat, lon = get_coords_offline(row.get('Hometown'), city_coords_map, all_city_keys)
-                        if lat:
-                            all_coords.append([radians(lat), radians(lon)])
-                            geo_tracker.append({'type': 'pnm', 'id': row['PNM ID'], 'hometown': row['Hometown']})
+                # Standardize PNM Columns
+                pnm_col_map = {
+                    'PNM Name': 'Full Name', 'Enter your hometown in the form City, State:': 'Hometown',
+                    'Enter your major or "Undecided":': 'Major', 'Enter your minor or leave blank:': 'Minor',
+                    'Enter your high school involvement (sports, clubs etc.), separate each activity by a comma:': 'High School Involvement',
+                    'Enter your college involvement (sports, clubs etc.), separate each activity by a comma:': 'College Involvement',
+                    'Enter your hobbies and interests, separate each activity by a comma:': 'Hobbies',
+                    'Pick your year in school:': 'Year'
+                }
+                pnm_clean = pnm_intial_interest.rename(columns=pnm_col_map)
+                df_mem = member_interest.copy()
+                
+                # --- CLUSTERING LOGIC ---
+                all_coords, geo_tracker = [], []
+                for idx, row in df_mem.iterrows():
+                    lat, lon = get_coords_offline(row.get('Hometown'), city_coords_map, all_city_keys)
+                    if lat: 
+                        all_coords.append([radians(lat), radians(lon)])
+                        geo_tracker.append({'type': 'mem', 'id': row['Sorority ID'], 'hometown': row['Hometown']})
+                for idx, row in pnm_clean.iterrows():
+                    lat, lon = get_coords_offline(row.get('Hometown'), city_coords_map, all_city_keys)
+                    if lat:
+                        all_coords.append([radians(lat), radians(lon)])
+                        geo_tracker.append({'type': 'pnm', 'id': row['PNM ID'], 'hometown': row['Hometown']})
 
-                    mem_geo_tags, pnm_geo_tags = {}, {}
-                    if all_coords:
-                        dist_matrix = haversine_distances(all_coords, all_coords) * 3958.8
-                        geo_clustering = AgglomerativeClustering(n_clusters=None, distance_threshold=30, metric='precomputed', linkage='single')
-                        geo_labels = geo_clustering.fit_predict(dist_matrix)
-                        geo_groups = {}
-                        for i, label in enumerate(geo_labels):
-                            if label not in geo_groups: geo_groups[label] = []
-                            geo_groups[label].append(geo_tracker[i]['hometown'])
-                        for i, label in enumerate(geo_labels):
-                            group_name = geo_groups[label][0]
-                            tracker = geo_tracker[i]
-                            if tracker['type'] == 'mem': mem_geo_tags[tracker['id']] = group_name
-                            else: pnm_geo_tags[tracker['id']] = group_name
+                mem_geo_tags, pnm_geo_tags = {}, {}
+                if all_coords:
+                    dist_matrix = haversine_distances(all_coords, all_coords) * 3958.8
+                    geo_clustering = AgglomerativeClustering(n_clusters=None, distance_threshold=30, metric='precomputed', linkage='single')
+                    geo_labels = geo_clustering.fit_predict(dist_matrix)
+                    geo_groups = {}
+                    for i, label in enumerate(geo_labels):
+                        if label not in geo_groups: geo_groups[label] = []
+                        geo_groups[label].append(geo_tracker[i]['hometown'])
+                    for i, label in enumerate(geo_labels):
+                        group_name = geo_groups[label][0]
+                        tracker = geo_tracker[i]
+                        if tracker['type'] == 'mem': mem_geo_tags[tracker['id']] = group_name
+                        else: pnm_geo_tags[tracker['id']] = group_name
 
-                    all_terms_list, mem_interest_map, pnm_interest_map = [], [], []
-                    cols_to_extract = ['Major', 'Minor', 'Hobbies', 'College Involvement', 'High School Involvement']
-                    for idx, row in df_mem.iterrows():
-                        terms = extract_terms(row, cols_to_extract)
-                        for term in terms: all_terms_list.append(term); mem_interest_map.append({'id': row['Sorority ID'], 'term': term})
-                    for idx, row in pnm_clean.iterrows():
-                        terms = extract_terms(row, cols_to_extract)
-                        for term in terms: all_terms_list.append(term); pnm_interest_map.append({'id': row['PNM ID'], 'term': term})
+                all_terms_list, mem_interest_map, pnm_interest_map = [], [], []
+                cols_to_extract = ['Major', 'Minor', 'Hobbies', 'College Involvement', 'High School Involvement']
+                for idx, row in df_mem.iterrows():
+                    terms = extract_terms(row, cols_to_extract)
+                    for term in terms: all_terms_list.append(term); mem_interest_map.append({'id': row['Sorority ID'], 'term': term})
+                for idx, row in pnm_clean.iterrows():
+                    terms = extract_terms(row, cols_to_extract)
+                    for term in terms: all_terms_list.append(term); pnm_interest_map.append({'id': row['PNM ID'], 'term': term})
 
-                    term_to_group = {}
-                    if all_terms_list:
-                        unique_terms = list(set(all_terms_list))
-                        embeddings = model.encode(unique_terms)
-                        sem_clustering = AgglomerativeClustering(n_clusters=None, distance_threshold=0.5, metric='cosine', linkage='average')
-                        sem_labels = sem_clustering.fit_predict(embeddings)
-                        temp_map = {}
-                        for term, label in zip(unique_terms, sem_labels):
-                            if label not in temp_map: temp_map[label] = []
-                            temp_map[label].append(term)
-                        for label, terms in temp_map.items():
-                            attr_name = min(terms, key=len)
-                            for term in terms: term_to_group[term] = attr_name
+                term_to_group = {}
+                if all_terms_list:
+                    unique_terms = list(set(all_terms_list))
+                    embeddings = model.encode(unique_terms)
+                    sem_clustering = AgglomerativeClustering(n_clusters=None, distance_threshold=0.5, metric='cosine', linkage='average')
+                    sem_labels = sem_clustering.fit_predict(embeddings)
+                    temp_map = {}
+                    for term, label in zip(unique_terms, sem_labels):
+                        if label not in temp_map: temp_map[label] = []
+                        temp_map[label].append(term)
+                    for label, terms in temp_map.items():
+                        attr_name = min(terms, key=len)
+                        for term in terms: term_to_group[term] = attr_name
 
-                    def finalize_attributes(df, id_col, geo_tags, int_map):
-                        final_attrs = {row[id_col]: set() for _, row in df.iterrows()}
-                        for idx, row in df.iterrows():
-                            pid = row[id_col]
-                            yt = get_year_tag(row.get('Year'))
-                            if yt: final_attrs[pid].add(yt)
-                            if pid in geo_tags: final_attrs[pid].add(geo_tags[pid])
-                        for entry in int_map:
-                            pid = entry['id']
-                            if entry['term'] in term_to_group: final_attrs[pid].add(term_to_group[entry['term']])
-                        return df[id_col].map(lambda x: ", ".join(final_attrs.get(x, set())))
+                def finalize_attributes(df, id_col, geo_tags, int_map):
+                    final_attrs = {row[id_col]: set() for _, row in df.iterrows()}
+                    for idx, row in df.iterrows():
+                        pid = row[id_col]
+                        yt = get_year_tag(row.get('Year'))
+                        if yt: final_attrs[pid].add(yt)
+                        if pid in geo_tags: final_attrs[pid].add(geo_tags[pid])
+                    for entry in int_map:
+                        pid = entry['id']
+                        if entry['term'] in term_to_group: final_attrs[pid].add(term_to_group[entry['term']])
+                    return df[id_col].map(lambda x: ", ".join(final_attrs.get(x, set())))
 
-                    member_interest['attributes_for_matching'] = finalize_attributes(df_mem, 'Sorority ID', mem_geo_tags, mem_interest_map)
-                    pnm_intial_interest['attributes_for_matching'] = finalize_attributes(pnm_clean, 'PNM ID', pnm_geo_tags, pnm_interest_map)
-                    
-                    status.update(label="Preprocessing Complete!", state="complete", expanded=False)
-
+                member_interest['attributes_for_matching'] = finalize_attributes(df_mem, 'Sorority ID', mem_geo_tags, mem_interest_map)
+                pnm_intial_interest['attributes_for_matching'] = finalize_attributes(pnm_clean, 'PNM ID', pnm_geo_tags, pnm_interest_map)
+                
                 # --- STEP 2: CALCULATE GLOBAL RANKING STATS (PNM & RECRUITER) ---
-                # This ensures the ranking bonus is agnostic to the scale (1-3, 1-5, etc.)
                 try:
                     # 1. PNM Stats
                     all_ranks = pd.to_numeric(pnm_intial_interest['Average Recruit Rank'], errors='coerce')
@@ -673,8 +664,6 @@ else:
                     t_global_max, t_global_min = 4.0, 1.0
 
                 # --- STEP 3: CORE MATCHING LOGIC ---
-                progress_bar = st.progress(0)
-                status_text = st.empty()
                 zip_buffer = BytesIO()
 
                 # Pre-process Data for Loop
@@ -702,8 +691,6 @@ else:
                 trait_freq = all_member_traits.value_counts()
                 trait_weights = (len(member_interest) / trait_freq).to_dict()
                 
-                # Removed hardcoded map: strength_bonus_map = {1: 1.5, 2: 1.0, 3: 0.5, 4: 0.0}
-
                 # Conversion helper for strings from GSheet
                 def to_float(val, default=1.0):
                     try: return float(val)
@@ -713,16 +700,12 @@ else:
                     try: return int(val)
                     except: return default
 
-                # === FIX START: Added compression and ensure download is OUTSIDE the 'with' block ===
-                
                 # List to store individual file data for later download buttons
                 individual_party_files = []
                 
                 with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
                     for party in range(1, int(num_parties) + 1):
-                        progress_bar.progress(party / num_parties)
-                        status_text.text(f"Processing Party {party}...")
-
+                        
                         pnms_df = pnm_intial_interest[pnm_intial_interest['Party'] == party].copy()
                         if pnms_df.empty: continue
 
@@ -734,13 +717,8 @@ else:
                             p_rank_val = to_float(row.get("Average Recruit Rank", 1.0))
                             
                             # --- AGNOSTIC BONUS CALCULATION ---
-                            # Clamp val to observed range just in case
                             safe_rank = max(global_min, min(p_rank_val, global_max))
-                            
-                            # Calculate relative strength (0.0 to 1.0)
                             relative_strength = (safe_rank - global_min) / (global_max - global_min)
-                            
-                            # Weight: 3.0 means a perfect recruit gets +3.0 score benefit
                             RANKING_WEIGHT = 3.0 
                             pnm_bonus = relative_strength * RANKING_WEIGHT
                             # ----------------------------------
@@ -751,7 +729,7 @@ else:
                                 'name': row.get('PNM Name', row.get('Full Name')),
                                 'attrs': p_attrs, 
                                 'rank': p_rank_val, 
-                                'bonus': pnm_bonus, # Updated bonus
+                                'bonus': pnm_bonus,
                                 'node_id': f"p_{i}"
                             })
 
@@ -775,15 +753,8 @@ else:
                                 t_rank_val = to_float(row.get("Ranking", t_global_max)) # Default to worst rank if missing
                                 
                                 # --- RECRUITER AGNOSTIC BONUS ---
-                                # Clamp
                                 safe_t_rank = max(t_global_min, min(t_rank_val, t_global_max))
-                                
-                                # INVERSE Calculation (Lower rank number = Higher Bonus)
-                                # Example: Range 1-4. Rank 1 is best.
-                                # Rank 1: (4 - 1) / (4 - 1) = 1.0 (100%)
-                                # Rank 4: (4 - 4) / (4 - 1) = 0.0 (0%)
                                 team_rel_strength = (t_global_max - safe_t_rank) / (t_global_max - t_global_min)
-                                
                                 TEAM_WEIGHT = 1.5 
                                 t_bonus = team_rel_strength * TEAM_WEIGHT
                                 # --------------------------------
@@ -1105,10 +1076,6 @@ else:
                             # Add to individual list
                             individual_party_files.append((f"Party {party}", file_name_x, file_content))
 
-                # === FIX END: Now we are OUTSIDE the 'with' block, so the zip is finalized ===
-                progress_bar.empty()
-                status_text.empty()
-                
                 # Save to Session State for Persistence
                 st.session_state.match_results = {
                     "zip_data": zip_buffer.getvalue(),
@@ -1130,6 +1097,7 @@ else:
                 mime="application/zip"
             )
             
+            # 2. Individual Downloads
             st.write("### Individual Party Sheets")
             
             files = st.session_state.match_results["individual_files"]
