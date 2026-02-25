@@ -808,13 +808,15 @@ else:
                                 
                                 pnm_names_in_party = {p['name'] for p in pnm_list}
                                 
-                                relevant_restrictions = 0
+                                relevant_conflicts = []
                                 for (m_name, p_name) in no_match_pairs:
                                     if p_name in pnm_names_in_party and m_name in active_team_members:
-                                        relevant_restrictions += 1
+                                        relevant_conflicts.append(f"{m_name} ❌ {p_name}")
                                         
-                                if relevant_restrictions > 0:
-                                    warning_msg += f"- **No Match Restrictions:** There are {relevant_restrictions} active 'No Match' constraints for this party (Member <> PNM pairs)."
+                                if relevant_conflicts:
+                                    warning_msg += f"- **Active No-Match Constraints:** {len(relevant_conflicts)} pairs found:\n"
+                                    for conf in relevant_conflicts:
+                                        warning_msg += f"  - {conf}\n"
                                     
                                 st.warning(warning_msg)
 
