@@ -788,19 +788,19 @@ else:
                             
                             # NEW VALIDATION
                             if len(pnm_list) > total_capacity:
-                                warning_msg = (f"⚠️ **Party {party} Warning**: Not enough capacity! "
+                                warning_msg = (f"**Party {party} Warning**: Not enough capacity! "
                                                f"{len(pnm_list)} PNMs vs {total_capacity} Slots ({len(team_list)} Teams × {matches_per_team}). "
                                                f"Unmatched PNMs will appear in the results.\n\n")
                                 
                                 # Check for excused teams
                                 if broken_teams_list:
-                                    warning_msg += f"🔴 **Excused Teams:** {len(broken_teams_list)} teams removed due to excuses:\n"
+                                    warning_msg += f"**Excused Teams:** {len(broken_teams_list)} team(s) removed due to excuses:\n"
                                     for b_team in broken_teams_list:
                                         team_display = ", ".join(b_team['members'])
                                         excused_person = ", ".join(b_team['missing'])
-                                        warning_msg += f"- Team [{team_display}] removed (Excused: **{excused_person}**)\n"
+                                        warning_msg += f"- Team {team_display} removed due to (Excused: **{excused_person}**)\n"
                                 else:
-                                    warning_msg += "✅ **Excused Teams:** No teams were removed due to excuses for this party.\n"
+                                    warning_msg += "No teams were removed due to excuses for this party.\n"
 
                                 warning_msg += "\n" # Spacing
                                 
@@ -814,14 +814,14 @@ else:
                                 relevant_conflicts = []
                                 for (m_name, p_name) in no_match_pairs:
                                     if p_name in pnm_names_in_party and m_name in active_team_members:
-                                        relevant_conflicts.append(f"{m_name} ❌ {p_name}")
+                                        relevant_conflicts.append(f"Sorority Member {m_name} and PNM {p_name}")
                                 
                                 if relevant_conflicts:
-                                    warning_msg += f"- **Active No-Match Constraints:** {len(relevant_conflicts)} pairs found:\n"
+                                    warning_msg += f"- **Active No-Match Constraints:** {len(relevant_conflicts)} pair(s) found:\n"
                                     for conf in relevant_conflicts:
                                         warning_msg += f"  - {conf}\n"
                                 else:
-                                    warning_msg += "- **Active No-Match Constraints:** No conflicts found between present PNMs and Members.\n"
+                                    warning_msg += "No conflicts found between present PNMs and Members.\n"
                                     
                                 st.warning(warning_msg)
 
