@@ -452,7 +452,7 @@ with tab4:
 
             with st.form(key=f"rank_form"):
                 # MODIFIED: Whole numbers (min=0, step=1)
-                score = st.number_input("Score (Whole Numbers only):", min_value=0, step=1, value=rank_default)
+                score = st.number_input("Score:", min_value=0, step=1, value=rank_default)
                 submit_rank = st.form_submit_button("Submit Ranking")
 
             if submit_rank:
