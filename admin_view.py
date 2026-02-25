@@ -283,8 +283,8 @@ def get_year_tag(year_val):
     return matches[0] if matches else raw.title()
 
 # --- MAIN PAGE ---
-st.set_page_config(page_title="Admin Dashboard", layout="wide")
-st.title("Sorority Admin Dashboard")
+st.set_page_config(page_title="Recruitment Admin Dashboard", layout="wide")
+st.title("Sorority Recruitment Administration Dashboard")
 
 # Initialize Session State for Results
 if "match_results" not in st.session_state:
