@@ -34,7 +34,7 @@ def get_sheet(worksheet_name):
     try:
         sh = client.open(SHEET_NAME)
     except gspread.SpreadsheetNotFound:
-        st.error(f"❌ CRITICAL ERROR: The Google Sheet file named '{SHEET_NAME}' was not found. Please ensure the file exists in Google Drive and is shared with the Service Account email.")
+        st.error(f"❌ CRITICAL ERROR: The Google Sheet file named '{SHEET_NAME}' was not found.")
         return None
     except Exception as e:
         st.error(f"❌ Error opening Spreadsheet: {e}")
@@ -44,7 +44,7 @@ def get_sheet(worksheet_name):
     try:
         return sh.worksheet(worksheet_name)
     except gspread.WorksheetNotFound:
-        st.error(f"❌ The Spreadsheet exists, but the tab '{worksheet_name}' was not found. Please check for typos or extra spaces.")
+        st.error(f"❌ The tab '{worksheet_name}' was not found.")
         return None
     except Exception as e:
         st.error(f"❌ Error opening Worksheet '{worksheet_name}': {e}")
@@ -94,29 +94,16 @@ def get_party_options():
 
 @st.cache_data(ttl=300)
 def get_roster():
-    """
-    Fetches the roster. 
-    PRIORITY 1: Checks 'Settings' tab (Column D) for an override list (from CSV upload).
-    PRIORITY 2: Falls back to 'Member Information' tab if Settings is empty.
-    """
-    # 1. Try checking for an override in Settings (Column D)
     try:
         sheet_settings = get_sheet("Settings")
         if sheet_settings:
-            # Admin dashboard usually writes roster to D2:D
             override_data = sheet_settings.col_values(4) 
-            
-            # Clean data (remove empty strings)
             clean_override = [n.strip() for n in override_data if n.strip()]
-            
-            # If we found names (assuming valid list), return them
             if clean_override:
                 return sorted(clean_override)
     except Exception:
-        # If Settings fails or doesn't exist, ignore and proceed to fallback
         pass
 
-    # 2. Fallback to Member Information (Original Logic)
     try:
         sheet = get_sheet("Member Information")
         if not sheet: return []
@@ -378,20 +365,16 @@ with tab4:
         st.divider()
 
         # Identify Key Columns
-        # 1. SPECIFICALLY LOOK FOR "PNM ID" as requested
         id_col = next((c for c in df_pnm.columns if c.strip().lower() == 'pnm id'), None)
-        # Fallback: if not found exactly, look for any column with "id"
         if not id_col:
             id_col = next((c for c in df_pnm.columns if 'id' in c.lower()), df_pnm.columns[0])
             
-        # 2. Look for Name Column
         name_col = next((c for c in df_pnm.columns if 'name' in c.lower()), df_pnm.columns[1])
         
         # Build Options with ID and Name
         pnm_options = ["View All PNMs"]
         pnm_map = {}
         for idx, row in df_pnm.iterrows():
-            # Create a label like "123 - Jane Doe"
             p_id = str(row[id_col])
             p_name = str(row[name_col])
             label = f"{p_id} - {p_name}"
@@ -421,24 +404,19 @@ with tab4:
             st.divider()
             
             # --- VIDEO EMBEDDING LOGIC ---
-            # Try to find a column that looks like a YouTube link
             video_col = next((c for c in df_pnm.columns if 'youtube' in c.lower() or 'video' in c.lower() or 'link' in c.lower()), None)
             
             if video_col:
                 video_url = str(pnm_data[video_col]).strip()
-                if video_url and len(video_url) > 5: # Basic check to ensure it's not empty/junk
+                if video_url and len(video_url) > 5:
                     st.write("#### Introduction Video")
                     try:
                         st.video(video_url)
                     except Exception:
                         st.warning(f"Could not load video from: {video_url}")
-            # -----------------------------
 
             col1, col2 = st.columns(2)
-            
-            # Filter out the video column from text display to avoid duplication
             fields = [item for item in pnm_data.items() if item[0] != video_col] if video_col else list(pnm_data.items())
-            
             mid = (len(fields) + 1) // 2
             
             def clean_key(k):
@@ -449,32 +427,32 @@ with tab4:
             with col2:
                 for k,v in fields[mid:]: st.info(f"**{clean_key(k)}:** {v}")
 
-            # --- RANKING FORM ---
+            # --- RANKING FORM (UPDATED FOR WHOLE NUMBERS) ---
             st.divider()
             st.subheader("Rate this PNM")
             
-            # 1. Select Ranker (Outside form to trigger update)
             ranker_name = st.selectbox("Your Name (Ranker):", [""] + roster, key="ranker_name")
             
-            rank_default = 0.0
+            # MODIFIED: Use integer for default
+            rank_default = 0
             existing_rank_row = None
             
-            # 2. Check for existing ranking
             if ranker_name:
                 sheet_rank = get_sheet("PNM Rankings")
                 if sheet_rank:
-                    # Search: Ranker Name (Col 3) AND PNM ID (Col 4)
                     r_idx, r_vals = find_row_composite(sheet_rank, 3, ranker_name, 4, curr_pnm_id)
                     if r_idx:
                         existing_rank_row = r_idx
                         if len(r_vals) > 5:
                             try:
-                                rank_default = float(r_vals[5])
+                                # Convert stored value to float then int to handle strings like "1.0"
+                                rank_default = int(float(r_vals[5]))
                             except:
                                 rank_default = 0
 
             with st.form(key=f"rank_form"):
-                score = st.number_input("Score:", min_value=0, step=1, value=rank_default)
+                # MODIFIED: Whole numbers (min=0, step=1)
+                score = st.number_input("Score (Whole Numbers only):", min_value=0, step=1, value=rank_default)
                 submit_rank = st.form_submit_button("Submit Ranking")
 
             if submit_rank:
@@ -486,7 +464,6 @@ with tab4:
                     
                     if sheet_rank and sheet_mem:
                         try:
-                            # Get Member ID
                             m_idx, m_vals = find_row_by_col(sheet_mem, 3, ranker_name)
                             ranker_id = m_vals[0] if m_vals else "Unknown"
                             
@@ -508,13 +485,11 @@ with tab4:
 with tab5:
     st.header("Prior PNM Connections")
     
-    # 1. LOAD DATA & PREPARE OPTIONS
     df_conn = get_pnm_dataframe()
     conn_options = [""]
-    conn_lookup = {} # Maps "ID - Name" -> (Name, ID)
+    conn_lookup = {} 
 
     if not df_conn.empty:
-        # Identify Columns (Same logic as Tab 4)
         id_col = next((c for c in df_conn.columns if c.strip().lower() == 'pnm id'), None)
         if not id_col: id_col = next((c for c in df_conn.columns if 'id' in c.lower()), df_conn.columns[0])
         name_col = next((c for c in df_conn.columns if 'name' in c.lower()), df_conn.columns[1])
@@ -530,10 +505,8 @@ with tab5:
     with col1:
         conn_member = st.selectbox("Your Name:", [""] + roster, key="conn_mem")
     with col2:
-        # MODIFIED: Select from ID - Name list
         conn_selection = st.selectbox("PNM (ID - Name):", conn_options, key="conn_pnm")
 
-    # Resolve selection to actual data
     conn_pnm_name = ""
     conn_pnm_id = ""
     if conn_selection and conn_selection in conn_lookup:
@@ -541,15 +514,13 @@ with tab5:
 
     existing_conn_row = None
     
-    # 2. Check Existence using the resolved Name
     if conn_member and conn_pnm_name:
         sheet_conn = get_sheet("Prior Connections")
         if sheet_conn:
-            # Search: Member (Col 2) AND PNM Name (Col 4)
             c_idx, c_vals = find_row_composite(sheet_conn, 2, conn_member, 4, conn_pnm_name)
             if c_idx:
                 existing_conn_row = c_idx
-                st.info(f"ℹ️ You already have a connection logged with {conn_pnm_name}. Submitting again will update the timestamp.")
+                st.info(f"ℹ️ You already have a connection logged with {conn_pnm_name}.")
 
     with st.form(key='connection_form'):
         submit_connection = st.form_submit_button(label='Submit/Update Connection')
@@ -563,11 +534,8 @@ with tab5:
 
             if sheet_conn and sheet_mem:
                 try:
-                    # Member ID
                     m_idx, m_vals = find_row_by_col(sheet_mem, 3, conn_member)
                     m_id = m_vals[0] if m_vals else "?"
-                    
-                    # PNM ID (We already have it from the selection!)
                     p_id = conn_pnm_id if conn_pnm_id else "?"
 
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
