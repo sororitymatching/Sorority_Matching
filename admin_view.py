@@ -284,7 +284,7 @@ def get_year_tag(year_val):
 
 # --- MAIN PAGE ---
 st.set_page_config(page_title="Admin Dashboard", layout="wide")
-st.title("Sorority Rush Administration Dashboard")
+st.title("Sorority Admin Dashboard")
 
 # Initialize Session State for Results
 if "match_results" not in st.session_state:
@@ -646,21 +646,31 @@ else:
                     
                     status.update(label="Preprocessing Complete!", state="complete", expanded=False)
 
-                # --- STEP 2: CALCULATE GLOBAL RANKING STATS ---
+                # --- STEP 2: CALCULATE GLOBAL RANKING STATS (PNM & RECRUITER) ---
                 # This ensures the ranking bonus is agnostic to the scale (1-3, 1-5, etc.)
                 try:
+                    # 1. PNM Stats
                     all_ranks = pd.to_numeric(pnm_intial_interest['Average Recruit Rank'], errors='coerce')
                     min_obs = all_ranks.min()
                     if pd.isna(min_obs): min_obs = 1.0
                     all_ranks = all_ranks.fillna(min_obs)
                     global_max = all_ranks.max()
                     global_min = all_ranks.min()
-                    
-                    # Avoid division by zero if everyone has the same rank
                     if global_max == global_min: global_max += 1.0 
+                    
+                    # 2. Recruiter (Team) Stats
+                    all_team_ranks = pd.to_numeric(bump_teams['Ranking'], errors='coerce')
+                    min_t_obs = all_team_ranks.min()
+                    if pd.isna(min_t_obs): min_t_obs = 1.0
+                    all_team_ranks = all_team_ranks.fillna(4.0) # Default if missing
+                    t_global_max = all_team_ranks.max()
+                    t_global_min = all_team_ranks.min()
+                    if t_global_max == t_global_min: t_global_max += 1.0
+                    
                 except Exception as e:
                     st.error(f"Error calculating global ranking stats: {e}")
-                    global_max, global_min = 5.0, 1.0 # Fallback
+                    global_max, global_min = 5.0, 1.0 
+                    t_global_max, t_global_min = 4.0, 1.0
 
                 # --- STEP 3: CORE MATCHING LOGIC ---
                 progress_bar = st.progress(0)
@@ -691,7 +701,8 @@ else:
                 all_member_traits = member_interest['attributes_for_matching'].str.split(', ').explode()
                 trait_freq = all_member_traits.value_counts()
                 trait_weights = (len(member_interest) / trait_freq).to_dict()
-                strength_bonus_map = {1: 1.5, 2: 1.0, 3: 0.5, 4: 0.0}
+                
+                # Removed hardcoded map: strength_bonus_map = {1: 1.5, 2: 1.0, 3: 0.5, 4: 0.0}
 
                 # Conversion helper for strings from GSheet
                 def to_float(val, default=1.0):
@@ -761,11 +772,26 @@ else:
                             if missing_members:
                                 broken_teams_list.append({'members': current_members, 'missing': missing_members})
                             else:
-                                t_rank = to_int(row.get("Ranking", 4))
+                                t_rank_val = to_float(row.get("Ranking", t_global_max)) # Default to worst rank if missing
+                                
+                                # --- RECRUITER AGNOSTIC BONUS ---
+                                # Clamp
+                                safe_t_rank = max(t_global_min, min(t_rank_val, t_global_max))
+                                
+                                # INVERSE Calculation (Lower rank number = Higher Bonus)
+                                # Example: Range 1-4. Rank 1 is best.
+                                # Rank 1: (4 - 1) / (4 - 1) = 1.0 (100%)
+                                # Rank 4: (4 - 4) / (4 - 1) = 0.0 (0%)
+                                team_rel_strength = (t_global_max - safe_t_rank) / (t_global_max - t_global_min)
+                                
+                                TEAM_WEIGHT = 1.5 
+                                t_bonus = team_rel_strength * TEAM_WEIGHT
+                                # --------------------------------
+
                                 team_list.append({
                                     't_idx': len(team_list), 'members': current_members, 'team_size': len(current_members),
                                     'member_ids': [name_to_id_map.get(m) for m in current_members],
-                                    'joined_names': ", ".join(current_members), 'bonus': strength_bonus_map.get(t_rank, 0.0),
+                                    'joined_names': ", ".join(current_members), 'bonus': t_bonus,
                                     'node_id': f"t_{len(team_list)}", 'row_data': row
                                 })
 
