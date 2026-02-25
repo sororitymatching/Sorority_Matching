@@ -416,12 +416,29 @@ with tab4:
             curr_pnm_id = str(pnm_data[id_col])
             curr_pnm_name = pnm_data[name_col]
             
-            # Display Profile
+            # Display Profile Header
             st.markdown(f"### 👤 {curr_pnm_name} (ID: {curr_pnm_id})")
             st.divider()
             
+            # --- VIDEO EMBEDDING LOGIC ---
+            # Try to find a column that looks like a YouTube link
+            video_col = next((c for c in df_pnm.columns if 'youtube' in c.lower() or 'video' in c.lower() or 'link' in c.lower()), None)
+            
+            if video_col:
+                video_url = str(pnm_data[video_col]).strip()
+                if video_url and len(video_url) > 5: # Basic check to ensure it's not empty/junk
+                    st.write("#### 🎥 Intro Video")
+                    try:
+                        st.video(video_url)
+                    except Exception:
+                        st.warning(f"Could not load video from: {video_url}")
+            # -----------------------------
+
             col1, col2 = st.columns(2)
-            fields = list(pnm_data.items())
+            
+            # Filter out the video column from text display to avoid duplication
+            fields = [item for item in pnm_data.items() if item[0] != video_col] if video_col else list(pnm_data.items())
+            
             mid = (len(fields) + 1) // 2
             
             def clean_key(k):
