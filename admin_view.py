@@ -786,6 +786,12 @@ else:
                             # --- Capacity Checks ---
                             total_capacity = len(team_list) * matches_per_team
                             
+                            # NEW VALIDATION
+                            if len(pnm_list) > total_capacity:
+                                st.warning(f"⚠️ **Party {party} Warning**: Not enough capacity! "
+                                           f"{len(pnm_list)} PNMs vs {total_capacity} Slots ({len(team_list)} Teams × {matches_per_team}). "
+                                           f"Unmatched PNMs will appear in the results.")
+
                             potential_pairs = []
                             for p_data in pnm_list:
                                 for t_data in team_list:
