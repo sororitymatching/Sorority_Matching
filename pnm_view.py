@@ -56,7 +56,7 @@ def find_pnm_by_email(sheet, email):
         return None, None
 
 # --- Main Form UI ---
-st.title("Initial Recruitment Interest Form - PNM")
+st.title("Initial Recruitment Interest Form")
 st.markdown("Please enter your **Penn State Email** to begin. If you are already in our system, your information will load automatically.")
 
 # 1. THE LOOKUP TRIGGER
