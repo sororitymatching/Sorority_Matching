@@ -799,7 +799,10 @@ else:
                                         team_display = ", ".join(b_team['members'])
                                         excused_person = ", ".join(b_team['missing'])
                                         warning_msg += f"- Team [{team_display}] removed (Excused: **{excused_person}**)\n"
-                                    warning_msg += "\n" # Spacing
+                                else:
+                                    warning_msg += "✅ **Excused Teams:** No teams were removed due to excuses for this party.\n"
+
+                                warning_msg += "\n" # Spacing
                                 
                                 # Check for relevant No-Match restrictions
                                 active_team_members = set()
@@ -812,11 +815,13 @@ else:
                                 for (m_name, p_name) in no_match_pairs:
                                     if p_name in pnm_names_in_party and m_name in active_team_members:
                                         relevant_conflicts.append(f"{m_name} ❌ {p_name}")
-                                        
+                                
                                 if relevant_conflicts:
                                     warning_msg += f"- **Active No-Match Constraints:** {len(relevant_conflicts)} pairs found:\n"
                                     for conf in relevant_conflicts:
                                         warning_msg += f"  - {conf}\n"
+                                else:
+                                    warning_msg += "- **Active No-Match Constraints:** No conflicts found between present PNMs and Members.\n"
                                     
                                 st.warning(warning_msg)
 
@@ -1001,7 +1006,7 @@ else:
                                                                 history.add((str(p['p_id']), str(raw_id)))
                                             except nx.NetworkXUnfeasible:
                                                 rotation_output.append({'Round': round_num, 'Team ID': t_idx, 'PNM Name': "FLOW FAIL", 'Reason': "Unfeasible"})
-                                        
+                                            
                                         elif method == 'greedy':
                                             candidates = []
                                             for p in assigned_pnms:
@@ -1102,7 +1107,7 @@ else:
                                             r1 = df_rot_flow[df_rot_flow['Round'] == 1].drop(columns=['Team ID', 'Round', 'Team Members'], errors='ignore')
                                             r1.to_excel(writer, sheet_name="Round_1_Matches_Flow", index=False)
                                             auto_adjust_columns(writer, "Round_1_Matches_Flow", r1)
-                                    
+                                     
                                     if not df_rot_greedy.empty:
                                         if is_bump_order_set == "n":
                                             # MODIFIED: Drop 'Team ID' and 'Team Members' for Rotation Greedy export
