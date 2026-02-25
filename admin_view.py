@@ -788,9 +788,30 @@ else:
                             
                             # NEW VALIDATION
                             if len(pnm_list) > total_capacity:
-                                st.warning(f"⚠️ **Party {party} Warning**: Not enough capacity! "
-                                           f"{len(pnm_list)} PNMs vs {total_capacity} Slots ({len(team_list)} Teams × {matches_per_team}). "
-                                           f"Unmatched PNMs will appear in the results.")
+                                warning_msg = (f"⚠️ **Party {party} Warning**: Not enough capacity! "
+                                               f"{len(pnm_list)} PNMs vs {total_capacity} Slots ({len(team_list)} Teams × {matches_per_team}). "
+                                               f"Unmatched PNMs will appear in the results.\n\n")
+                                
+                                # Check for excused teams
+                                if broken_teams_list:
+                                    warning_msg += f"- **Excused Teams:** {len(broken_teams_list)} bump teams were removed because a member was excused (Found in 'Party Excuses').\n"
+                                
+                                # Check for relevant No-Match restrictions
+                                active_team_members = set()
+                                for t in team_list:
+                                    active_team_members.update(t['members'])
+                                
+                                pnm_names_in_party = {p['name'] for p in pnm_list}
+                                
+                                relevant_restrictions = 0
+                                for (m_name, p_name) in no_match_pairs:
+                                    if p_name in pnm_names_in_party and m_name in active_team_members:
+                                        relevant_restrictions += 1
+                                        
+                                if relevant_restrictions > 0:
+                                    warning_msg += f"- **No Match Restrictions:** There are {relevant_restrictions} active 'No Match' constraints for this party (Member <> PNM pairs)."
+                                    
+                                st.warning(warning_msg)
 
                             potential_pairs = []
                             for p_data in pnm_list:
