@@ -284,7 +284,7 @@ def get_year_tag(year_val):
 
 # --- MAIN PAGE ---
 st.set_page_config(page_title="Admin Dashboard", layout="wide")
-st.title("Sorority Admin Dashboard")
+st.title("Sorority Rush Administration Dashboard")
 
 # Initialize Session State for Results
 if "match_results" not in st.session_state:
