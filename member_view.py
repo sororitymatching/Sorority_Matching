@@ -417,7 +417,7 @@ with tab4:
             curr_pnm_name = pnm_data[name_col]
             
             # Display Profile Header
-            st.markdown(f"### 👤 {curr_pnm_name} (ID: {curr_pnm_id})")
+            st.markdown(f"### {curr_pnm_name} (ID: {curr_pnm_id})")
             st.divider()
             
             # --- VIDEO EMBEDDING LOGIC ---
@@ -427,7 +427,7 @@ with tab4:
             if video_col:
                 video_url = str(pnm_data[video_col]).strip()
                 if video_url and len(video_url) > 5: # Basic check to ensure it's not empty/junk
-                    st.write("#### 🎥 Intro Video")
+                    st.write("#### Introduction Video")
                     try:
                         st.video(video_url)
                     except Exception:
@@ -451,7 +451,7 @@ with tab4:
 
             # --- RANKING FORM ---
             st.divider()
-            st.subheader("⭐ Rate this PNM")
+            st.subheader("Rate this PNM")
             
             # 1. Select Ranker (Outside form to trigger update)
             ranker_name = st.selectbox("Your Name (Ranker):", [""] + roster, key="ranker_name")
