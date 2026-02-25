@@ -794,11 +794,11 @@ else:
                                 
                                 # Check for excused teams
                                 if broken_teams_list:
-                                    warning_msg += f"**Excused Teams:** {len(broken_teams_list)} team(s) removed due to excuses:\n"
+                                    warning_msg += f"- **Excused Teams:** {len(broken_teams_list)} team(s) removed due to excuses:\n"
                                     for b_team in broken_teams_list:
                                         team_display = ", ".join(b_team['members'])
                                         excused_person = ", ".join(b_team['missing'])
-                                        warning_msg += f"- Team {team_display} removed due to (Excused: **{excused_person}**)\n"
+                                        warning_msg += f"  - Team {team_display} removed due to (Excused: **{excused_person}**)\n"
                                 else:
                                     warning_msg += "No teams were removed due to excuses for this party.\n"
 
