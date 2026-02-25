@@ -471,10 +471,10 @@ with tab4:
                             try:
                                 rank_default = float(r_vals[5])
                             except:
-                                rank_default = 0.0
+                                rank_default = 0
 
             with st.form(key=f"rank_form"):
-                score = st.number_input("Score:", min_value=0.0, step=0.1, value=rank_default)
+                score = st.number_input("Score:", min_value=0, step=1, value=rank_default)
                 submit_rank = st.form_submit_button("Submit Ranking")
 
             if submit_rank:
