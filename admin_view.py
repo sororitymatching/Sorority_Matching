@@ -1130,13 +1130,29 @@ else:
                 mime="application/zip"
             )
             
-            # 2. Individual Downloads
             st.write("### Individual Party Sheets")
-            for label, fname, data in st.session_state.match_results["individual_files"]:
-                st.download_button(
-                    label=f"Download {label}",
-                    data=data,
-                    file_name=fname,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"dl_btn_{fname}"
-                )
+            
+            files = st.session_state.match_results["individual_files"]
+            
+            # Define how many buttons you want per row (e.g., 4)
+            cols_per_row = 4
+            
+            # Loop through the files in chunks to create rows
+            for i in range(0, len(files), cols_per_row):
+                # Get the batch of files for this row
+                row_files = files[i : i + cols_per_row]
+                
+                # Create the columns for this row
+                cols = st.columns(cols_per_row)
+                
+                # Place buttons inside the columns
+                for idx, (label, fname, data) in enumerate(row_files):
+                    with cols[idx]:
+                        st.download_button(
+                            label=f"Download {label}",
+                            data=data,
+                            file_name=fname,
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key=f"dl_btn_{fname}",
+                            use_container_width=True  # This makes the button stretch to fill the column
+                        )
