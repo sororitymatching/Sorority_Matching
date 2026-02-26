@@ -389,6 +389,12 @@ else:
     with tab3:
         st.header("PNM Ranking Management")
         
+        # --- ADDED REFRESH BUTTON FOR PNM DATA ---
+        if st.button("🔄 Refresh PNM & Ranking Data"):
+            st.cache_data.clear()
+            st.rerun()
+        # -----------------------------------------
+
         # Load Data
         df_votes = get_data("PNM Rankings")
         df_pnms_master = get_data("PNM Information") # Load master list for cross-referencing
@@ -506,6 +512,13 @@ else:
     # --- TAB 4: VIEW BUMP TEAMS ---
     with tab4:
         st.header("Bump Team Management")
+        
+        # --- ADDED REFRESH BUTTON FOR BUMP TEAMS ---
+        if st.button("🔄 Refresh Bump Teams"):
+            st.cache_data.clear()
+            st.rerun()
+        # -------------------------------------------
+
         df_teams = get_data("Bump Teams")
         if not df_teams.empty:
             id_col = next((c for c in df_teams.columns if 'team id' in c.lower() or 'id' in c.lower()), df_teams.columns[4] if len(df_teams.columns)>4 else None)
