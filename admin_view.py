@@ -550,6 +550,8 @@ else:
         else: st.info("No prior connections found.")
             
     # --- TAB 7: RUN MATCHING ---
+
+    # --- TAB 7: RUN MATCHING ---
     with tab7:
         st.header("Run Matching Algorithm")
         
@@ -574,6 +576,22 @@ else:
         st.subheader("Upload PNM Party Assignments")
         party_assignment_file = st.file_uploader("Upload CSV containing 'PNM ID', 'PNM Name', and 'Party'", type=["csv"])
         
+        # --- PREVIEW LOGIC ADDED HERE ---
+        if party_assignment_file:
+            try:
+                # Read just for preview
+                df_preview = pd.read_csv(party_assignment_file)
+                
+                # IMPORTANT: Reset file pointer to the beginning so the algorithm can read it again later
+                party_assignment_file.seek(0)
+                
+                with st.expander("👀 Preview Uploaded Data (Click to Expand)"):
+                    st.write(f"**Rows found:** {len(df_preview)}")
+                    st.dataframe(df_preview.head(), use_container_width=True)
+            except Exception as e:
+                st.error(f"Error generating preview: {e}")
+        # --------------------------------
+
         run_button = st.button("Run Matching Algorithm", type="primary", use_container_width=True)
 
         # --- MAIN LOGIC ---
@@ -1163,7 +1181,7 @@ else:
                                             r1 = df_rot_flow[df_rot_flow['Round'] == 1].drop(columns=['Team ID', 'Round', 'Team Members'], errors='ignore')
                                             r1.to_excel(writer, sheet_name="Round_1_Matches_Flow", index=False)
                                             auto_adjust_columns(writer, "Round_1_Matches_Flow", r1)
-                                     
+                                    
                                     if not df_rot_greedy.empty:
                                         if is_bump_order_set == "n":
                                             # MODIFIED: Drop 'Team ID' and 'Team Members' for Rotation Greedy export
