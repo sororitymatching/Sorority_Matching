@@ -348,9 +348,18 @@ else:
                     name_col = next((c for c in df_upload.columns if "name" in c.lower()), None)
                     if name_col: new_names = df_upload[name_col].astype(str).tolist()
                     else: new_names = df_upload.iloc[:, 0].astype(str).tolist() if not df_upload.empty else []
+                    
+                    # Clean the names
                     new_names = [n for n in new_names if n.lower() != 'nan' and n.strip()]
+                    
                     if new_names:
                         st.success(f"Found {len(new_names)} names in CSV.")
+                        
+                        # --- PREVIEW SECTION ---
+                        with st.expander("👀 Preview Extracted Names (Click to View)"):
+                            st.dataframe(pd.DataFrame(new_names, columns=["Names to Import"]), height=200, use_container_width=True)
+                        # -----------------------
+
                         if st.button("Override Roster with CSV"):
                             if update_roster(new_names): st.success("✅ Roster overwritten!"); st.toast("Roster Overwritten!")
                             else: st.error("Failed to update settings.")
