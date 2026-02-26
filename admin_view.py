@@ -141,6 +141,27 @@ def update_settings(cell, value):
         return True
     except: return False
 
+def get_max_party_count():
+    """
+    Reads the 'Party Information' sheet and calculates the max value in the 'Party' column.
+    """
+    try:
+        df_party = get_data("Party Information")
+        if df_party.empty:
+            return 4
+        
+        # Find column matching "Party" (case-insensitive)
+        party_col = next((c for c in df_party.columns if c.lower() == 'party'), None)
+        
+        if party_col:
+            # Convert to numeric, coerce errors to NaN, drop NaNs, find max
+            max_val = pd.to_numeric(df_party[party_col], errors='coerce').max()
+            if pd.notna(max_val):
+                return int(max_val)
+        return 4
+    except Exception:
+        return 4
+
 def update_roster(names_list):
     try:
         gc = get_gc()
@@ -308,12 +329,16 @@ else:
     # --- TAB 1: SETTINGS ---
     with tab1:
         st.header("Event Configuration")
-        current_parties = get_setting_value('B1')
-        default_val = int(current_parties) if current_parties and str(current_parties).isdigit() else 4
+        
+        # --- MODIFIED: Pull from 'Party Information' Sheet ---
+        detected_party_count = get_max_party_count()
+        st.info(f"ℹ️ Detected **{detected_party_count}** parties from the 'Party Information' sheet.")
+        
         with st.form("party_config"):
-            count = st.number_input("Number of Parties", 1, 50, default_val)
-            if st.form_submit_button("Update Party Count"):
-                if update_settings('B1', count): st.toast("Updated!")
+            count = st.number_input("Number of Parties (System uses Detected Count by Default)", 1, 50, detected_party_count)
+            # Saving to settings optional if we trust the sheet, but kept for legacy structure
+            if st.form_submit_button("Update Party Count Setting (Optional)"):
+                if update_settings('B1', count): st.toast("Updated Settings Cell!")
         
         st.divider()
         st.header("Roster Management")
@@ -633,13 +658,14 @@ else:
         st.header("Run Matching Algorithm")
         
         st.subheader("Matching Algorithm Settings")
+        
+        # --- MODIFIED: Use the detected count from 'Party Information' ---
         try:
-            setting_parties = get_setting_value('B1')
-            num_parties = int(setting_parties) if setting_parties and str(setting_parties).isdigit() else 4
+            num_parties = get_max_party_count()
         except:
             num_parties = 4
             
-        st.info(f"**Total Parties:** {num_parties} (Synced from Settings & Roster Tab)")
+        st.info(f"**Total Parties:** {num_parties} (Detected from 'Party Information' sheet)")
         
         # User input for Matches per Team and Rounds
         matches_per_team = st.number_input("Matches per Bump Team (Capacity)", min_value=1, value=2)
