@@ -377,9 +377,12 @@ else:
         else: st.info("No member information found.")
 
     # --- TAB 3: PNM RANKINGS ---
+
+    # --- TAB 3: PNM RANKINGS ---
     with tab3:
         st.header("PNM Ranking Management")
         df_votes = get_data("PNM Rankings")
+        
         if not df_votes.empty:
             try:
                 df_votes['Score'] = pd.to_numeric(df_votes['Score'], errors='coerce')
@@ -402,11 +405,24 @@ else:
                             count = batch_update_pnm_rankings(rankings_map)
                         st.success(f"✅ Auto-synced {count} PNM rankings!")
                     
+                    st.divider()
                     st.subheader("Raw Ranking Data")
-                    st.dataframe(df_votes, use_container_width=True)
+                    
+                    # --- ADDED SEARCH BAR FOR RAW RANKINGS ---
+                    rank_search = st.text_input("🔍 Search Raw Rankings:", key="raw_rank_search")
+                    if rank_search:
+                        # Filter: Check if the search term exists in any column of the row
+                        display_votes = df_votes[df_votes.astype(str).apply(lambda x: x.str.contains(rank_search, case=False).any(), axis=1)]
+                    else:
+                        display_votes = df_votes
+                    
+                    st.dataframe(display_votes, use_container_width=True)
+                    # -----------------------------------------
+
                 else: st.error("Missing 'PNM ID' or 'Score' columns.")
             except Exception as e: st.error(f"Error processing rankings: {e}")
         else: st.info("No votes found in 'PNM Rankings' sheet yet.")
+        
         st.divider()
         st.subheader("Current PNM Database")
         df_pnms = get_data("PNM Information")
@@ -414,7 +430,7 @@ else:
             pnm_search = st.text_input("🔍 Search PNM Database:")
             display_pnm = df_pnms[df_pnms.astype(str).apply(lambda x: x.str.contains(pnm_search, case=False).any(), axis=1)] if pnm_search else df_pnms
             st.dataframe(display_pnm, use_container_width=True)
-        else: st.info("No PNM data found.")
+        else: st.info("No PNM data found.")  
 
     # --- TAB 4: VIEW BUMP TEAMS ---
     with tab4:
