@@ -427,14 +427,15 @@ with tab4:
             with col2:
                 for k,v in fields[mid:]: st.info(f"**{clean_key(k)}:** {v}")
 
-            # --- RANKING FORM (UPDATED FOR WHOLE NUMBERS) ---
+            # --- RANKING FORM (UPDATED) ---
             st.divider()
             st.subheader("Rate this PNM")
             
             ranker_name = st.selectbox("Your Name (Ranker):", [""] + roster, key="ranker_name")
             
-            # MODIFIED: Use integer for default
+            # Use integer for default score
             rank_default = 0
+            rank_reason_default = "" # Default reason
             existing_rank_row = None
             
             if ranker_name:
@@ -443,21 +444,27 @@ with tab4:
                     r_idx, r_vals = find_row_composite(sheet_rank, 3, ranker_name, 4, curr_pnm_id)
                     if r_idx:
                         existing_rank_row = r_idx
+                        # Extract Score (Column 6/F)
                         if len(r_vals) > 5:
                             try:
-                                # Convert stored value to float then int to handle strings like "1.0"
                                 rank_default = int(float(r_vals[5]))
                             except:
                                 rank_default = 0
+                        # Extract Reason (Column 7/G) if it exists
+                        if len(r_vals) > 6:
+                            rank_reason_default = r_vals[6]
 
             with st.form(key=f"rank_form"):
-                # MODIFIED: Whole numbers (min=0, step=1)
-                score = st.number_input("Score:", min_value=0, step=1, value=rank_default)
+                score = st.number_input("Score (0 if undecided):", min_value=0, step=1, value=rank_default)
+                reason = st.text_area("Reason for Ranking:", value=rank_reason_default, placeholder="Explain your score...")
                 submit_rank = st.form_submit_button("Submit Ranking")
 
             if submit_rank:
+                # Validation: Name, Ranking (we accept 0, but checking user presence), and Reason
                 if not ranker_name:
                     st.warning("⚠️ Select your name.")
+                elif not reason.strip():
+                    st.warning("⚠️ Please provide a reason for this ranking.")
                 else:
                     sheet_rank = get_sheet("PNM Rankings")
                     sheet_mem = get_sheet("Member Information")
@@ -468,14 +475,16 @@ with tab4:
                             ranker_id = m_vals[0] if m_vals else "Unknown"
                             
                             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            row_data = [timestamp, ranker_id, ranker_name, curr_pnm_id, curr_pnm_name, score]
+                            # Now includes reason at the end
+                            row_data = [timestamp, ranker_id, ranker_name, curr_pnm_id, curr_pnm_name, score, reason]
                             
                             if existing_rank_row:
-                                sheet_rank.update(f"A{existing_rank_row}:F{existing_rank_row}", [row_data])
-                                st.success("✅ Ranking UPDATED!")
+                                # Updates range A to G (7 columns)
+                                sheet_rank.update(f"A{existing_rank_row}:G{existing_rank_row}", [row_data])
+                                st.success("✅ Ranking & Reason UPDATED!")
                             else:
                                 sheet_rank.append_row(row_data)
-                                st.success("✅ Ranking SUBMITTED!")
+                                st.success("✅ Ranking & Reason SUBMITTED!")
                         except Exception as e:
                             st.error(f"Error: {e}")
 
