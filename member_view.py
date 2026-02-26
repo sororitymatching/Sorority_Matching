@@ -537,7 +537,8 @@ with tab5:
         submit_connection = st.form_submit_button(label='Submit/Update Connection')
 
     if submit_connection:
-        if not conn_member or not conn_pnm_name or not conn_default_reason:
+        # VALIDATION CHANGE: NOW CHECKS connection_note AS WELL
+        if not conn_member or not conn_pnm_name or not connection_note.strip():
             st.warning("⚠️ Please select both names and describe the relationship.")
         else:
             sheet_conn = get_sheet("Prior Connections")
