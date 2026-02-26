@@ -400,7 +400,7 @@ else:
 
         if not df_votes.empty and id_col_votes:
             # --- VALIDATION LOGIC START ---
-            st.markdown("### 🔍 Ranking Validation Check")
+            st.markdown("### Ranking Validation Check")
             st.info("Set the minimum required rankings per PNM below. The system will check if every PNM in the database meets this threshold.")
             
             c_val1, c_val2 = st.columns([1, 2])
