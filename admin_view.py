@@ -507,18 +507,39 @@ else:
         if st.button("🔄 Refresh Excuses"): 
             st.cache_data.clear()
             st.rerun()
+        
         df_ex = get_data("Party Excuses")
-        if not df_ex.empty: st.dataframe(df_ex, use_container_width=True)
+        if not df_ex.empty:
+            # --- ADDED SEARCH BAR FOR EXCUSES ---
+            excuse_search = st.text_input("🔍 Search Excuses:", key="excuse_search_input")
+            if excuse_search:
+                display_ex = df_ex[df_ex.astype(str).apply(lambda x: x.str.contains(excuse_search, case=False).any(), axis=1)]
+            else:
+                display_ex = df_ex
+            # ------------------------------------
+            
+            st.dataframe(display_ex, use_container_width=True)
         else: st.info("No excuses found.")
+
     with tab6:
-        st.header("Prior PNM Connections Log")
+        st.header("Prior Member - PNM Connections")
         if st.button("🔄 Refresh Connections"): 
             st.cache_data.clear()
             st.rerun()
+        
         df_conn = get_data("Prior Connections")
-        if not df_conn.empty: st.dataframe(df_conn, use_container_width=True)
-        else: st.info("No prior connections found.")
+        if not df_conn.empty:
+            # --- ADDED SEARCH BAR FOR CONNECTIONS ---
+            conn_search = st.text_input("🔍 Search Prior Connections:", key="conn_search_input")
+            if conn_search:
+                display_conn = df_conn[df_conn.astype(str).apply(lambda x: x.str.contains(conn_search, case=False).any(), axis=1)]
+            else:
+                display_conn = df_conn
+            # ----------------------------------------
 
+            st.dataframe(display_conn, use_container_width=True)
+        else: st.info("No prior connections found.")
+            
     # --- TAB 7: RUN MATCHING ---
     with tab7:
         st.header("Run Matching Algorithm")
