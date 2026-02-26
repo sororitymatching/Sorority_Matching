@@ -388,27 +388,92 @@ else:
     # --- TAB 3: PNM RANKINGS ---
     with tab3:
         st.header("PNM Ranking Management")
-        df_votes = get_data("PNM Rankings")
         
+        # Load Data
+        df_votes = get_data("PNM Rankings")
+        df_pnms_master = get_data("PNM Information") # Load master list for cross-referencing
+        
+        # Identify ID column in votes
+        id_col_votes = None
         if not df_votes.empty:
+            id_col_votes = next((c for c in df_votes.columns if 'pnm id' in c.lower() or 'id' == c.lower()), None)
+
+        if not df_votes.empty and id_col_votes:
+            # --- VALIDATION LOGIC START ---
+            st.markdown("### 🔍 Ranking Validation Check")
+            st.info("Set the minimum required rankings per PNM below. The system will check if every PNM in the database meets this threshold.")
+            
+            c_val1, c_val2 = st.columns([1, 2])
+            with c_val1:
+                min_rankings_req = st.number_input("Minimum Rankings Required", min_value=1, value=3, step=1)
+            
+            # Perform Check
+            validation_passed = False
+            
+            # 1. Get IDs and Names from Master List
+            master_id_col = next((c for c in df_pnms_master.columns if 'pnm id' in c.lower() or 'id' == c.lower()), None)
+            master_name_col = next((c for c in df_pnms_master.columns if 'pnm name' in c.lower() or 'full name' in c.lower()), None)
+            
+            if not df_pnms_master.empty and master_id_col:
+                # Calculate counts from votes dataframe
+                vote_counts = df_votes[id_col_votes].astype(str).str.strip().value_counts().reset_index()
+                vote_counts.columns = ['PNM ID', 'Vote Count']
+                
+                # Prepare Master list
+                validation_df = df_pnms_master[[master_id_col]].copy()
+                validation_df.columns = ['PNM ID']
+                if master_name_col:
+                    validation_df['Name'] = df_pnms_master[master_name_col]
+                else:
+                    validation_df['Name'] = "Unknown"
+                
+                validation_df['PNM ID'] = validation_df['PNM ID'].astype(str).str.strip()
+                
+                # Merge Master with Vote Counts (Left Join ensures we see 0s)
+                validation_df = validation_df.merge(vote_counts, on='PNM ID', how='left').fillna(0)
+                validation_df['Vote Count'] = validation_df['Vote Count'].astype(int)
+                
+                # Filter for failures
+                failed_pnms = validation_df[validation_df['Vote Count'] < min_rankings_req]
+                
+                if not failed_pnms.empty:
+                    st.error(f"🛑 {len(failed_pnms)} PNMs have fewer than {min_rankings_req} rankings!")
+                    st.dataframe(failed_pnms.sort_values(by='Vote Count'), use_container_width=True, hide_index=True)
+                    st.warning("You can still sync, but averages for these PNMs will be based on incomplete data (or will be 0).")
+                else:
+                    st.success(f"✅ All {len(validation_df)} PNMs meet the minimum ranking requirement ({min_rankings_req}).")
+                    validation_passed = True
+            else:
+                st.warning("Could not load PNM Master list for validation. Checking only available votes.")
+                # Fallback: check only counts within df_votes
+                counts = df_votes[id_col_votes].value_counts()
+                failed = counts[counts < min_rankings_req]
+                if not failed.empty:
+                    st.error(f"Some active IDs have fewer than {min_rankings_req} votes.")
+                else:
+                    st.success("All currently voted-on PNMs meet requirements.")
+            
+            st.divider()
+            # --- VALIDATION LOGIC END ---
+
             try:
                 df_votes['Score'] = pd.to_numeric(df_votes['Score'], errors='coerce')
-                id_col = next((c for c in df_votes.columns if 'pnm id' in c.lower()), None)
-                if not id_col: id_col = next((c for c in df_votes.columns if 'id' in c.lower()), None)
 
-                if id_col and 'Score' in df_votes.columns:
-                    group_cols = [id_col]
-                    name_col = next((c for c in df_votes.columns if 'pnm name' in c.lower()), None)
-                    if name_col: group_cols.append(name_col)
+                if id_col_votes and 'Score' in df_votes.columns:
+                    group_cols = [id_col_votes]
+                    name_col_votes = next((c for c in df_votes.columns if 'pnm name' in c.lower()), None)
+                    if name_col_votes: group_cols.append(name_col_votes)
                     
                     avg_df = df_votes.groupby(group_cols)['Score'].mean().reset_index()
                     avg_df.rename(columns={'Score': 'Calculated Average'}, inplace=True)
                     avg_df = avg_df.sort_values(by='Calculated Average', ascending=False)
                     
-                    st.info(f"Processing {len(df_votes)} total votes across {len(avg_df)} unique PNMs...")
+                    st.subheader("Sync Rankings")
+                    st.write(f"Ready to process {len(df_votes)} total votes across {len(avg_df)} unique PNMs.")
+                    
                     if st.button("Sync Rankings to PNM Sheet"):
                         with st.spinner("Syncing..."):
-                            rankings_map = {str(row[id_col]).strip(): round(row['Calculated Average'], 2) for idx, row in avg_df.iterrows()}
+                            rankings_map = {str(row[id_col_votes]).strip(): round(row['Calculated Average'], 2) for idx, row in avg_df.iterrows()}
                             count = batch_update_pnm_rankings(rankings_map)
                         st.success(f"✅ Auto-synced {count} PNM rankings!")
                     
@@ -426,16 +491,15 @@ else:
                     st.dataframe(display_votes, use_container_width=True)
                     # -----------------------------------------
 
-                else: st.error("Missing 'PNM ID' or 'Score' columns.")
+                else: st.error("Missing 'PNM ID' or 'Score' columns in Ranking Sheet.")
             except Exception as e: st.error(f"Error processing rankings: {e}")
-        else: st.info("No votes found in 'PNM Rankings' sheet yet.")
+        else: st.info("No votes found in 'PNM Rankings' sheet yet (or ID column missing).")
         
         st.divider()
         st.subheader("Current PNM Database")
-        df_pnms = get_data("PNM Information")
-        if not df_pnms.empty:
+        if not df_pnms_master.empty:
             pnm_search = st.text_input("🔍 Search PNM Database:")
-            display_pnm = df_pnms[df_pnms.astype(str).apply(lambda x: x.str.contains(pnm_search, case=False).any(), axis=1)] if pnm_search else df_pnms
+            display_pnm = df_pnms_master[df_pnms_master.astype(str).apply(lambda x: x.str.contains(pnm_search, case=False).any(), axis=1)] if pnm_search else df_pnms_master
             st.dataframe(display_pnm, use_container_width=True)
         else: st.info("No PNM data found.")  
 
@@ -1056,7 +1120,7 @@ else:
                                                     reason = ", ".join(shared) if shared else "Rotation"
                                                     if is_repeat: reason += " (Repeat)"
                                                     sub_G.add_edge(f"p_{p['p_id']}", f"m_{m['id']}", capacity=1, weight=final_cost, reason=reason)
-                                                
+                                            
                                             try:
                                                 sub_flow = nx.min_cost_flow(sub_G)
                                                 for p in assigned_pnms:
@@ -1094,7 +1158,7 @@ else:
                                                     reason = ", ".join(shared) if shared else "Rotation"
                                                     if is_repeat: reason += " (Repeat)"
                                                     candidates.append((final_score, p, m, reason, is_repeat))
-                                                
+                                            
                                             candidates.sort(key=lambda x: x[0], reverse=True)
                                             
                                             round_pnm_done, round_mem_done = set(), set()
@@ -1108,7 +1172,7 @@ else:
                                                     })
                                                     round_pnm_done.add(p['p_id']); round_mem_done.add(m['id'])
                                                     history.add((str(p['p_id']), str(m['id'])))
-                                return rotation_output
+                                    return rotation_output
 
                             internal_flow_results = run_internal_rotation(assignments_map_flow, method='flow')
                             internal_greedy_results = run_internal_rotation(assignments_map_greedy, method='greedy')
@@ -1175,12 +1239,12 @@ else:
                                             rot_flow_out.to_excel(writer, sheet_name="Rotation_Flow", index=False)
                                             auto_adjust_columns(writer, "Rotation_Flow", rot_flow_out)
                                             
-                                            if not df_bump_flow.empty: df_bump_flow.to_excel(writer, sheet_name="Bump_Logistics_Flow", index=False); auto_adjust_columns(writer, "Bump_Logistics_Flow", df_bump_flow)
-                                        else:
-                                            # MODIFIED: Drop 'Team ID', 'Round', and 'Team Members' for Round 1 Matches
-                                            r1 = df_rot_flow[df_rot_flow['Round'] == 1].drop(columns=['Team ID', 'Round', 'Team Members'], errors='ignore')
-                                            r1.to_excel(writer, sheet_name="Round_1_Matches_Flow", index=False)
-                                            auto_adjust_columns(writer, "Round_1_Matches_Flow", r1)
+                                        if not df_bump_flow.empty: df_bump_flow.to_excel(writer, sheet_name="Bump_Logistics_Flow", index=False); auto_adjust_columns(writer, "Bump_Logistics_Flow", df_bump_flow)
+                                    else:
+                                        # MODIFIED: Drop 'Team ID', 'Round', and 'Team Members' for Round 1 Matches
+                                        r1 = df_rot_flow[df_rot_flow['Round'] == 1].drop(columns=['Team ID', 'Round', 'Team Members'], errors='ignore')
+                                        r1.to_excel(writer, sheet_name="Round_1_Matches_Flow", index=False)
+                                        auto_adjust_columns(writer, "Round_1_Matches_Flow", r1)
                                     
                                     if not df_rot_greedy.empty:
                                         if is_bump_order_set == "n":
@@ -1189,12 +1253,12 @@ else:
                                             rot_greedy_out.to_excel(writer, sheet_name="Rotation_Greedy", index=False)
                                             auto_adjust_columns(writer, "Rotation_Greedy", rot_greedy_out)
                                             
-                                            if not df_bump_greedy.empty: df_bump_greedy.to_excel(writer, sheet_name="Bump_Logistics_Greedy", index=False); auto_adjust_columns(writer, "Bump_Logistics_Greedy", df_bump_greedy)
-                                        else:
-                                            # MODIFIED: Drop 'Team ID', 'Round', and 'Team Members' for Round 1 Matches
-                                            r1 = df_rot_greedy[df_rot_greedy['Round'] == 1].drop(columns=['Team ID', 'Round', 'Team Members'], errors='ignore')
-                                            r1.to_excel(writer, sheet_name="Round_1_Matches_Greedy", index=False)
-                                            auto_adjust_columns(writer, "Round_1_Matches_Greedy", r1)
+                                        if not df_bump_greedy.empty: df_bump_greedy.to_excel(writer, sheet_name="Bump_Logistics_Greedy", index=False); auto_adjust_columns(writer, "Bump_Logistics_Greedy", df_bump_greedy)
+                                    else:
+                                        # MODIFIED: Drop 'Team ID', 'Round', and 'Team Members' for Round 1 Matches
+                                        r1 = df_rot_greedy[df_rot_greedy['Round'] == 1].drop(columns=['Team ID', 'Round', 'Team Members'], errors='ignore')
+                                        r1.to_excel(writer, sheet_name="Round_1_Matches_Greedy", index=False)
+                                        auto_adjust_columns(writer, "Round_1_Matches_Greedy", r1)
                                 
                                 # Save the output content to variables for later
                                 file_content = output.getvalue()
