@@ -84,35 +84,50 @@ def find_row_composite(sheet, col_idx_1, val_1, col_idx_2, val_2):
 @st.cache_data(ttl=60) 
 def get_party_options():
     """
-    Calculates the number of parties by finding the Maximum value 
-    in the 'Party' column of the 'Party Information' sheet.
+    Fetches Party IDs and Datetimes from 'Party Information' sheet.
+    Returns strings like: "Party 1 (Friday 5:00 PM)"
     """
     try:
-        # Open the specific sheet
         sheet = get_sheet("Party Information")
         if not sheet: 
-            return ["Party 1", "Party 2", "Party 3", "Party 4"] # Default fallback
+            return ["Party 1", "Party 2", "Party 3", "Party 4"]
         
-        # Get all data to find the max value
         all_values = sheet.get_all_values()
         if not all_values:
             return ["Party 1", "Party 2", "Party 3", "Party 4"]
 
-        # Convert to DataFrame to handle column lookup easily
+        # Create DataFrame
         headers = [str(h).strip().lower() for h in all_values[0]]
         df = pd.DataFrame(all_values[1:], columns=headers)
         
-        # Find the column named 'party'
-        if 'party' in df.columns:
-            # Convert column to numeric, ignoring errors (non-numbers)
-            max_val = pd.to_numeric(df['party'], errors='coerce').max()
-            
-            # If we found a valid number, generate the list
-            if pd.notna(max_val):
-                num_parties = int(max_val)
-                return [f"Party {i+1}" for i in range(num_parties)]
+        options = []
         
-        # Fallback if column not found or empty
+        # Look for 'party' column
+        party_col = next((c for c in df.columns if c == 'party'), None)
+        # Look for date/time column
+        date_col = next((c for c in df.columns if 'date' in c or 'time' in c), None)
+
+        if party_col:
+            for _, row in df.iterrows():
+                p_val = str(row[party_col]).strip()
+                if not p_val: continue
+                
+                label = f"Party {p_val}"
+                if date_col:
+                    d_val = str(row[date_col]).strip()
+                    if d_val:
+                        label += f" ({d_val})"
+                
+                options.append(label)
+            
+            # Sort by the numeric part of the party string if possible
+            try:
+                options.sort(key=lambda x: int(x.split()[1]))
+            except:
+                options.sort()
+                
+            if options: return options
+
         return ["Party 1", "Party 2", "Party 3", "Party 4"]
     except Exception:
         return ["Party 1", "Party 2", "Party 3", "Party 4"]
@@ -326,22 +341,25 @@ with tab3:
 
     excuse_name = st.selectbox("Choose your name:", [""] + roster, key="excuse_name")
     
-    # 1. Select specific party
-    selected_party = st.selectbox("Select the party you cannot attend:", [""] + party_options, key="excuse_party_select")
+    # 1. Select specific party from the dynamically generated list
+    selected_party_display = st.selectbox("Select the party you cannot attend:", [""] + party_options, key="excuse_party_select")
+    
+    # Parse the clean name for logic (e.g., "Party 1")
+    # This splits "Party 1 (Friday 5pm)" into ["Party 1", "Friday 5pm)"] and takes the first part
+    selected_party_clean = selected_party_display.split(" (")[0] if selected_party_display else ""
     
     existing_reason = ""
     existing_row_idx = None
     
     # Check for existing data for this specific member AND party
-    if excuse_name and selected_party:
+    if excuse_name and selected_party_clean:
         sheet_excuses = get_sheet("Party Excuses")
         if sheet_excuses:
-            # We look for a row where Name matches (col 2) AND Party matches (col 4)
-            # Assumption: Sheet structure is [Timestamp, Name, ID, Party, Reason, Image]
-            row_idx, row_vals = find_row_composite(sheet_excuses, 2, excuse_name, 4, selected_party)
+            # Look for row where Name matches (col 2) AND Party matches (col 4 - using the clean name)
+            row_idx, row_vals = find_row_composite(sheet_excuses, 2, excuse_name, 4, selected_party_clean)
             if row_idx:
                 existing_row_idx = row_idx
-                st.info(f"ℹ️ You have already submitted an excuse for {selected_party}. Submitting again will update it.")
+                st.info(f"ℹ️ You have already submitted an excuse for {selected_party_clean}. Submitting again will update it.")
                 if len(row_vals) > 4:
                     existing_reason = row_vals[4]
 
@@ -358,7 +376,7 @@ with tab3:
         # 4. Strict Validation: Check Name, Party, Reason, and Image
         if not excuse_name:
             st.error("⚠️ Please select your name.")
-        elif not selected_party:
+        elif not selected_party_clean:
             st.error("⚠️ Please select a party.")
         elif not excuse_reason.strip():
             st.error("⚠️ Please provide a reason for missing the party.")
@@ -381,17 +399,17 @@ with tab3:
                     # Store filename as placeholder for the image
                     image_filename = proof_image.name
                     
-                    # Data Structure: Timestamp, Name, ID, Party, Reason, Proof
-                    row_data = [timestamp, excuse_name, member_id, selected_party, excuse_reason, image_filename]
+                    # Data Structure: Timestamp, Name, ID, Clean Party Name (No Date), Reason, Proof
+                    row_data = [timestamp, excuse_name, member_id, selected_party_clean, excuse_reason, image_filename]
                     
                     if existing_row_idx:
                         # Update existing row (Cols A-F)
                         sheet_excuses.update(f"A{existing_row_idx}:F{existing_row_idx}", [row_data])
-                        st.success(f"✅ Excuse for {selected_party} UPDATED!")
+                        st.success(f"✅ Excuse for {selected_party_clean} UPDATED!")
                     else:
                         # Append new row
                         sheet_excuses.append_row(row_data)
-                        st.success(f"✅ Excuse for {selected_party} SUBMITTED!")
+                        st.success(f"✅ Excuse for {selected_party_clean} SUBMITTED!")
                     
                     st.balloons()
                 except Exception as e:
