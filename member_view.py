@@ -293,52 +293,81 @@ with tab2:
                     st.error(f"Error: {e}")
 
 # ==========================
-# TAB 3: PARTY EXCUSES
+# TAB 3: PARTY EXCUSES (MODIFIED)
 # ==========================
 with tab3:
     st.header("Recruitment Party Excuse Form")
-    st.markdown("Select your name to view or update your excuses.")
+    st.markdown("Submit an excuse for **one party at a time**. Valid proof (an image upload) is required.")
 
     excuse_name = st.selectbox("Choose your name:", [""] + roster, key="excuse_name")
     
-    excuse_defaults = []
-    excuse_row_idx = None
+    # 1. Select specific party
+    selected_party = st.selectbox("Select the party you cannot attend:", [""] + party_options, key="excuse_party_select")
     
-    if excuse_name:
+    existing_reason = ""
+    existing_row_idx = None
+    
+    # Check for existing data for this specific member AND party
+    if excuse_name and selected_party:
         sheet_excuses = get_sheet("Party Excuses")
         if sheet_excuses:
-            row_idx, row_vals = find_row_by_col(sheet_excuses, 2, excuse_name)
+            # We look for a row where Name matches (col 2) AND Party matches (col 4)
+            # Assumption: Sheet structure is [Timestamp, Name, ID, Party, Reason, Image]
+            row_idx, row_vals = find_row_composite(sheet_excuses, 2, excuse_name, 4, selected_party)
             if row_idx:
-                excuse_row_idx = row_idx
-                if len(row_vals) > 3:
-                    p_list = [p.strip() for p in row_vals[3].split(",")]
-                    excuse_defaults = [p for p in p_list if p in party_options]
+                existing_row_idx = row_idx
+                st.info(f"ℹ️ You have already submitted an excuse for {selected_party}. Submitting again will update it.")
+                if len(row_vals) > 4:
+                    existing_reason = row_vals[4]
 
     with st.form(key='excuse_form'):
-        parties = st.multiselect("Parties you cannot attend:", party_options, default=excuse_defaults)
+        # 2. Reason Text
+        excuse_reason = st.text_area("Reason for skipping:", value=existing_reason, placeholder="e.g. Class conflict (BIO 101), Doctor's Appointment")
+        
+        # 3. Image Upload
+        proof_image = st.file_uploader("Upload Proof (Image required):", type=['png', 'jpg', 'jpeg'])
+        
         submit_excuse = st.form_submit_button(label='Submit Excuse')
 
     if submit_excuse:
-        if not excuse_name or not parties:
-            st.warning("⚠️ Please fill in details.")
+        # 4. Strict Validation: Check Name, Party, Reason, and Image
+        if not excuse_name:
+            st.error("⚠️ Please select your name.")
+        elif not selected_party:
+            st.error("⚠️ Please select a party.")
+        elif not excuse_reason.strip():
+            st.error("⚠️ Please provide a reason for missing the party.")
+        # If updating, we might technically allow no new image, but the prompt asks to "check all components included"
+        # So we enforce image upload every time for validity.
+        elif not proof_image: 
+            st.error("⚠️ You must upload an image to support your reason.")
         else:
             sheet_excuses = get_sheet("Party Excuses")
             sheet_mem = get_sheet("Member Information")
             
             if sheet_excuses and sheet_mem:
                 try:
+                    # Get Member ID
                     row_i, row_v = find_row_by_col(sheet_mem, 3, excuse_name)
                     member_id = row_v[0] if row_v else "Unknown"
                     
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    parties_str = ", ".join(parties)
                     
-                    if excuse_row_idx:
-                        sheet_excuses.update(f"A{excuse_row_idx}:D{excuse_row_idx}", [[timestamp, excuse_name, member_id, parties_str]])
-                        st.success("✅ Excuse UPDATED!")
+                    # Store filename as placeholder for the image
+                    image_filename = proof_image.name
+                    
+                    # Data Structure: Timestamp, Name, ID, Party, Reason, Proof
+                    row_data = [timestamp, excuse_name, member_id, selected_party, excuse_reason, image_filename]
+                    
+                    if existing_row_idx:
+                        # Update existing row (Cols A-F)
+                        sheet_excuses.update(f"A{existing_row_idx}:F{existing_row_idx}", [row_data])
+                        st.success(f"✅ Excuse for {selected_party} UPDATED!")
                     else:
-                        sheet_excuses.append_row([timestamp, excuse_name, member_id, parties_str])
-                        st.success("✅ Excuse SUBMITTED!")
+                        # Append new row
+                        sheet_excuses.append_row(row_data)
+                        st.success(f"✅ Excuse for {selected_party} SUBMITTED!")
+                    
                     st.balloons()
                 except Exception as e:
                     st.error(f"Error: {e}")
