@@ -437,7 +437,7 @@ else:
                 failed_pnms = validation_df[validation_df['Vote Count'] < min_rankings_req]
                 
                 if not failed_pnms.empty:
-                    st.error(f"{len(failed_pnms)} PNMs have fewer than {min_rankings_req} rankings!")
+                    st.error(f"{len(failed_pnms)} PNM(s) have fewer than {min_rankings_req} rankings!")
                     st.dataframe(failed_pnms.sort_values(by='Vote Count'), use_container_width=True, hide_index=True)
                     st.warning("You can still sync, but averages for these PNMs will be based on incomplete data (or will be 0).")
                 else:
