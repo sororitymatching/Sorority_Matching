@@ -356,7 +356,7 @@ else:
                         st.success(f"Found {len(new_names)} names in CSV.")
                         
                         # --- PREVIEW SECTION ---
-                        with st.expander("👀 Preview Extracted Names (Click to View)"):
+                        with st.expander("Preview Extracted Names (Click to View)"):
                             st.dataframe(pd.DataFrame(new_names, columns=["Names to Import"]), height=200, use_container_width=True)
                         # -----------------------
 
