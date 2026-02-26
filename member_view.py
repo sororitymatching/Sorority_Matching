@@ -513,6 +513,7 @@ with tab5:
         conn_pnm_name, conn_pnm_id = conn_lookup[conn_selection]
 
     existing_conn_row = None
+    conn_default_reason = "" # Initialize default reason
     
     if conn_member and conn_pnm_name:
         sheet_conn = get_sheet("Prior Connections")
@@ -521,8 +522,18 @@ with tab5:
             if c_idx:
                 existing_conn_row = c_idx
                 st.info(f"ℹ️ You already have a connection logged with {conn_pnm_name}.")
+                
+                # Check if there is a 6th column (Reason) in the existing data
+                # c_vals is the list of values in the row. Index 5 is Column F.
+                if len(c_vals) > 5:
+                    conn_default_reason = c_vals[5]
 
     with st.form(key='connection_form'):
+        connection_note = st.text_area(
+            "Description of Relationship / Reason for Conflict:", 
+            value=conn_default_reason,
+            placeholder="e.g., 'She is my cousin', 'We had a conflict in high school', 'Family friend', etc."
+        )
         submit_connection = st.form_submit_button(label='Submit/Update Connection')
 
     if submit_connection:
@@ -539,11 +550,14 @@ with tab5:
                     p_id = conn_pnm_id if conn_pnm_id else "?"
 
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    row_data = [timestamp, conn_member, m_id, conn_pnm_name, p_id]
+                    
+                    # Update row data to include the note at index 5 (Column F)
+                    row_data = [timestamp, conn_member, m_id, conn_pnm_name, p_id, connection_note]
                     
                     if existing_conn_row:
-                        sheet_conn.update(f"A{existing_conn_row}:E{existing_conn_row}", [row_data])
-                        st.success("✅ Connection Timestamp UPDATED!")
+                        # Update range extended to F to include the note
+                        sheet_conn.update(f"A{existing_conn_row}:F{existing_conn_row}", [row_data])
+                        st.success("✅ Connection Data UPDATED!")
                     else:
                         sheet_conn.append_row(row_data)
                         st.success("✅ Connection SAVED!")
