@@ -83,13 +83,38 @@ def find_row_composite(sheet, col_idx_1, val_1, col_idx_2, val_2):
 
 @st.cache_data(ttl=60) 
 def get_party_options():
+    """
+    Calculates the number of parties by finding the Maximum value 
+    in the 'Party' column of the 'Party Information' sheet.
+    """
     try:
-        sheet = get_sheet("Settings")
-        if not sheet: return ["Party 1", "Party 2", "Party 3", "Party 4"]
-        val = sheet.acell('B1').value
-        num_parties = int(val) if val and val.isdigit() else 4
-        return [f"Party {i+1}" for i in range(num_parties)]
-    except:
+        # Open the specific sheet
+        sheet = get_sheet("Party Information")
+        if not sheet: 
+            return ["Party 1", "Party 2", "Party 3", "Party 4"] # Default fallback
+        
+        # Get all data to find the max value
+        all_values = sheet.get_all_values()
+        if not all_values:
+            return ["Party 1", "Party 2", "Party 3", "Party 4"]
+
+        # Convert to DataFrame to handle column lookup easily
+        headers = [str(h).strip().lower() for h in all_values[0]]
+        df = pd.DataFrame(all_values[1:], columns=headers)
+        
+        # Find the column named 'party'
+        if 'party' in df.columns:
+            # Convert column to numeric, ignoring errors (non-numbers)
+            max_val = pd.to_numeric(df['party'], errors='coerce').max()
+            
+            # If we found a valid number, generate the list
+            if pd.notna(max_val):
+                num_parties = int(max_val)
+                return [f"Party {i+1}" for i in range(num_parties)]
+        
+        # Fallback if column not found or empty
+        return ["Party 1", "Party 2", "Party 3", "Party 4"]
+    except Exception:
         return ["Party 1", "Party 2", "Party 3", "Party 4"]
 
 @st.cache_data(ttl=300)
