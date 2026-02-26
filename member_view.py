@@ -537,8 +537,8 @@ with tab5:
         submit_connection = st.form_submit_button(label='Submit/Update Connection')
 
     if submit_connection:
-        if not conn_member or not conn_pnm_name:
-            st.warning("⚠️ Please select both names.")
+        if not conn_member or not conn_pnm_name or not conn_default_reason:
+            st.warning("⚠️ Please select both names and describe the relationship.")
         else:
             sheet_conn = get_sheet("Prior Connections")
             sheet_mem = get_sheet("Member Information")
