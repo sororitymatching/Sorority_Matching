@@ -437,11 +437,11 @@ else:
                 failed_pnms = validation_df[validation_df['Vote Count'] < min_rankings_req]
                 
                 if not failed_pnms.empty:
-                    st.error(f"🛑 {len(failed_pnms)} PNMs have fewer than {min_rankings_req} rankings!")
+                    st.error(f"{len(failed_pnms)} PNMs have fewer than {min_rankings_req} rankings!")
                     st.dataframe(failed_pnms.sort_values(by='Vote Count'), use_container_width=True, hide_index=True)
                     st.warning("You can still sync, but averages for these PNMs will be based on incomplete data (or will be 0).")
                 else:
-                    st.success(f"✅ All {len(validation_df)} PNMs meet the minimum ranking requirement ({min_rankings_req}).")
+                    st.success(f"All {len(validation_df)} PNMs meet the minimum ranking requirement ({min_rankings_req}).")
                     validation_passed = True
             else:
                 st.warning("Could not load PNM Master list for validation. Checking only available votes.")
