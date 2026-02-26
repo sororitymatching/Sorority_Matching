@@ -332,13 +332,7 @@ else:
         
         # --- MODIFIED: Pull from 'Party Information' Sheet ---
         detected_party_count = get_max_party_count()
-        st.info(f"ℹ️ Detected **{detected_party_count}** parties from the 'Party Information' sheet.")
-        
-        with st.form("party_config"):
-            count = st.number_input("Number of Parties (System uses Detected Count by Default)", 1, 50, detected_party_count)
-            # Saving to settings optional if we trust the sheet, but kept for legacy structure
-            if st.form_submit_button("Update Party Count Setting (Optional)"):
-                if update_settings('B1', count): st.toast("Updated Settings Cell!")
+        st.info(f"ℹ️ **Party Count:** {detected_party_count} (Detected automatically from 'Party Information' sheet)")
         
         st.divider()
         st.header("Roster Management")
@@ -660,11 +654,8 @@ else:
         st.subheader("Matching Algorithm Settings")
         
         # --- MODIFIED: Use the detected count from 'Party Information' ---
-        try:
-            num_parties = get_max_party_count()
-        except:
-            num_parties = 4
-            
+        num_parties = get_max_party_count() # Simplified, get_max_party_count handles the try/except/default internally
+
         st.info(f"**Total Parties:** {num_parties} (Detected from 'Party Information' sheet)")
         
         # User input for Matches per Team and Rounds
