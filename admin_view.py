@@ -585,7 +585,7 @@ else:
                 # IMPORTANT: Reset file pointer to the beginning so the algorithm can read it again later
                 party_assignment_file.seek(0)
                 
-                with st.expander("👀 Preview Uploaded Data (Click to Expand)"):
+                with st.expander("Preview Uploaded Data (Click to Expand)"):
                     st.write(f"**Rows found:** {len(df_preview)}")
                     st.dataframe(df_preview.head(), use_container_width=True)
             except Exception as e:
