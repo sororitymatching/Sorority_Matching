@@ -377,8 +377,6 @@ else:
         else: st.info("No member information found.")
 
     # --- TAB 3: PNM RANKINGS ---
-
-    # --- TAB 3: PNM RANKINGS ---
     with tab3:
         st.header("PNM Ranking Management")
         df_votes = get_data("PNM Rankings")
@@ -487,10 +485,22 @@ else:
                                 else: st.warning("No valid teams found.")
                             else: st.error("CSV missing required columns.")
                         except Exception as e: st.error(f"Error: {e}")
+            
             st.divider()
-            st.dataframe(df_teams.drop(columns=['display_label'], errors='ignore'), use_container_width=True)
-        else: st.info("No bump teams found yet.")
+            st.subheader("Current Bump Teams List")
+            
+            # --- ADDED SEARCH BAR HERE ---
+            team_search = st.text_input("🔍 Search Bump Teams:", key="bump_team_search")
+            
+            if team_search:
+                display_teams = df_teams[df_teams.astype(str).apply(lambda x: x.str.contains(team_search, case=False).any(), axis=1)]
+            else:
+                display_teams = df_teams
+            # -----------------------------
 
+            st.dataframe(display_teams.drop(columns=['display_label'], errors='ignore'), use_container_width=True)
+        else: st.info("No bump teams found yet.")
+            
     # --- TAB 5 & 6: EXCUSES & CONNECTIONS ---
     with tab5:
         st.header("Member Party Excuses")
