@@ -7,13 +7,13 @@ import re
 import difflib
 import io
 import zipfile
-import time
+import time  # Added for sleep/backoff
 from io import BytesIO
 from math import radians
 from sentence_transformers import SentenceTransformer
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.metrics.pairwise import haversine_distances
-from gspread.exceptions import APIError # Added for error handling
+from gspread.exceptions import APIError  # Added for error handling
 
 # --- CONFIGURATION ---
 SHEET_NAME = "OverallMatchingInformation"
@@ -58,16 +58,16 @@ def get_gc():
 # 2. Retry wrapper to handle 429 errors automatically
 def smart_read_sheet(sheet_object):
     """Tries to read a sheet, waits and retries if quota is hit."""
-    for n in range(5): # Try 5 times
+    for n in range(5):  # Try 5 times
         try:
             return sheet_object.get_all_values()
         except APIError as e:
             if "429" in str(e):
-                wait_time = (2 ** n) + 1 # Exponential backoff: 2s, 3s, 5s...
+                wait_time = (2 ** n) + 1  # Exponential backoff: 2s, 3s, 5s...
                 time.sleep(wait_time)
             else:
                 raise e
-    return [] # Return empty if all retries fail
+    return []  # Return empty if all retries fail
 
 # 3. Cache the data fetching (TTL=600s means it refreshes every 10 mins automatically)
 @st.cache_data(ttl=600)
@@ -78,15 +78,15 @@ def get_data(worksheet_name):
         # Open sheet but use retry logic for the actual read
         sheet = gc.open(SHEET_NAME).worksheet(worksheet_name)
         data = smart_read_sheet(sheet)
-        
+
         if not data: return pd.DataFrame()
         df = pd.DataFrame(data[1:], columns=data[0])
         df.columns = df.columns.str.strip()
         return df
     except Exception as e:
         # Avoid error spam if sheet is just missing
-        if worksheet_name != "PNM Information": 
-            pass 
+        if worksheet_name != "PNM Information":
+            pass
         return pd.DataFrame()
 
 # 4. Cache the bulk loader used in "Run Matching"
@@ -132,14 +132,16 @@ def get_setting_value(cell):
         gc = get_gc()
         sheet = gc.open(SHEET_NAME).worksheet("Settings")
         return sheet.acell(cell).value
-    except: return None
+    except:
+        return None
 
 def update_settings(cell, value):
     try:
         gc = get_gc()
         gc.open(SHEET_NAME).worksheet("Settings").update_acell(cell, value)
         return True
-    except: return False
+    except:
+        return False
 
 def get_max_party_count():
     """
@@ -149,10 +151,10 @@ def get_max_party_count():
         df_party = get_data("Party Information")
         if df_party.empty:
             return 4
-        
+
         # Find column matching "Party" (case-insensitive)
         party_col = next((c for c in df_party.columns if c.lower() == 'party'), None)
-        
+
         if party_col:
             # Convert to numeric, coerce errors to NaN, drop NaNs, find max
             max_val = pd.to_numeric(df_party[party_col], errors='coerce').max()
@@ -171,10 +173,11 @@ def update_roster(names_list):
         formatted = [[n] for n in names_list if n.strip()]
         if formatted: ws.update(range_name='D2', values=formatted)
         return True
-    except: return False
+    except:
+        return False
 
 def get_active_roster_names():
-    # Attempt to pull from cache first via get_data if possible, 
+    # Attempt to pull from cache first via get_data if possible,
     # but since this reads 'Settings' specifically (a custom range), we try/except it.
     try:
         gc = get_gc()
@@ -183,7 +186,8 @@ def get_active_roster_names():
         roster_data = sheet.get_values("D2:D")
         names = [r[0].strip() for r in roster_data if r and r[0].strip()]
         if names: return names
-    except: pass
+    except:
+        pass
 
     # Fallback to member info (which IS cached now)
     df_mem = get_data("Member Information")
@@ -209,21 +213,26 @@ def update_team_ranking(team_id, new_ranking):
             load_google_sheet_data.clear()
             return True
         return False
-    except: return False
+    except:
+        return False
 
 def batch_update_pnm_rankings(rankings_map):
     try:
         gc = get_gc()
         sheet = gc.open(SHEET_NAME).worksheet("PNM Information")
-        all_values = smart_read_sheet(sheet) # Use smart read
+        all_values = smart_read_sheet(sheet)  # Use smart read
         if not all_values: return 0
         headers = [h.lower().strip() for h in all_values[0]]
-        
-        try: id_idx = next(i for i, h in enumerate(headers) if 'pnm id' in h or 'id' == h)
-        except: id_idx = 23
-            
-        try: rank_idx = next(i for i, h in enumerate(headers) if 'recruit rank' in h or 'average' in h)
-        except: rank_idx = 24
+
+        try:
+            id_idx = next(i for i, h in enumerate(headers) if 'pnm id' in h or 'id' == h)
+        except:
+            id_idx = 23
+
+        try:
+            rank_idx = next(i for i, h in enumerate(headers) if 'recruit rank' in h or 'average' in h)
+        except:
+            rank_idx = 24
 
         updates_count = 0
         for i in range(1, len(all_values)):
@@ -235,7 +244,7 @@ def batch_update_pnm_rankings(rankings_map):
                 row[rank_idx] = str(rankings_map[p_id])
                 updates_count += 1
         sheet.update(values=all_values, range_name="A1")
-        
+
         # Clear cache
         get_data.clear()
         load_google_sheet_data.clear()
@@ -248,14 +257,18 @@ def batch_update_team_rankings(rankings_map):
     try:
         gc = get_gc()
         sheet = gc.open(SHEET_NAME).worksheet("Bump Teams")
-        all_values = smart_read_sheet(sheet) # Use smart read
+        all_values = smart_read_sheet(sheet)  # Use smart read
         if not all_values: return 0
         headers = [h.lower().strip() for h in all_values[0]]
-        
-        try: id_idx = next(i for i, h in enumerate(headers) if 'team id' in h or 'id' == h)
-        except: id_idx = 4
-        try: rank_idx = next(i for i, h in enumerate(headers) if 'ranking' in h or 'rank' in h)
-        except: rank_idx = 5
+
+        try:
+            id_idx = next(i for i, h in enumerate(headers) if 'team id' in h or 'id' == h)
+        except:
+            id_idx = 4
+        try:
+            rank_idx = next(i for i, h in enumerate(headers) if 'ranking' in h or 'rank' in h)
+        except:
+            rank_idx = 5
 
         updates_count = 0
         for i in range(1, len(all_values)):
@@ -267,7 +280,7 @@ def batch_update_team_rankings(rankings_map):
                 row[rank_idx] = str(rankings_map[t_id])
                 updates_count += 1
         sheet.update(values=all_values, range_name="A1")
-        
+
         # Clear cache
         get_data.clear()
         load_google_sheet_data.clear()
@@ -322,7 +335,7 @@ else:
     st.success("Logged in as Admin")
 
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-        "Settings & Roster", "Member Information", "PNM Information and Rankings", 
+        "Settings & Roster", "Member Information", "PNM Information and Rankings",
         "View Bump Teams", "View Excuses", "View Prior Connections", "Run Matching",
         "View Generated Matches"
     ])
@@ -330,11 +343,11 @@ else:
     # --- TAB 1: SETTINGS ---
     with tab1:
         st.header("Event Configuration")
-        
+
         # --- MODIFIED: Pull from 'Party Information' Sheet ---
         detected_party_count = get_max_party_count()
         st.info(f"ℹ️ **Party Count:** {detected_party_count} (Detected automatically from 'Party Information' sheet)")
-        
+
         st.divider()
         st.header("Roster Management")
         col_r1, col_r2 = st.columns(2)
@@ -343,7 +356,7 @@ else:
             st.info("Pull names directly from the 'Member Information' tab.")
             # FORCE REFRESH HERE
             if st.button("🔄 Sync Roster from 'Member Information'"):
-                st.cache_data.clear() # Clear cache to ensure we get fresh data
+                st.cache_data.clear()  # Clear cache to ensure we get fresh data
                 df_source = get_data("Member Information")
                 if not df_source.empty:
                     possible_cols = ["Full Name", "Name", "Member Name", "Member"]
@@ -352,11 +365,15 @@ else:
                         if any(c.lower() in col.lower() for c in possible_cols): found_col = col; break
                     if found_col:
                         names = df_source[found_col].astype(str).unique().tolist()
-                        names = [n for n in names if n.strip()] 
-                        if update_roster(names): st.success(f"✅ Successfully synced {len(names)} members!")
-                        else: st.error("Failed to update Settings.")
-                    else: st.error("Could not find name column.")
-                else: st.error("'Member Information' sheet is empty.")
+                        names = [n for n in names if n.strip()]
+                        if update_roster(names):
+                            st.success(f"✅ Successfully synced {len(names)} members!")
+                        else:
+                            st.error("Failed to update Settings.")
+                    else:
+                        st.error("Could not find name column.")
+                else:
+                    st.error("'Member Information' sheet is empty.")
         with col_r2:
             st.subheader("Option B: Upload CSV")
             st.info("Upload a CSV file to strictly override the roster names.")
@@ -366,49 +383,57 @@ else:
                     df_upload = pd.read_csv(file)
                     new_names = []
                     name_col = next((c for c in df_upload.columns if "name" in c.lower()), None)
-                    if name_col: new_names = df_upload[name_col].astype(str).tolist()
-                    else: new_names = df_upload.iloc[:, 0].astype(str).tolist() if not df_upload.empty else []
-                    
+                    if name_col:
+                        new_names = df_upload[name_col].astype(str).tolist()
+                    else:
+                        new_names = df_upload.iloc[:, 0].astype(str).tolist() if not df_upload.empty else []
+
                     # Clean the names
                     new_names = [n for n in new_names if n.lower() != 'nan' and n.strip()]
-                    
+
                     if new_names:
                         st.success(f"Found {len(new_names)} names in CSV.")
-                        
+
                         # --- PREVIEW SECTION ---
                         with st.expander("Preview Extracted Names (Click to View)"):
                             st.dataframe(pd.DataFrame(new_names, columns=["Names to Import"]), height=200, use_container_width=True)
                         # -----------------------
 
                         if st.button("Override Roster with CSV"):
-                            if update_roster(new_names): st.success("✅ Roster overwritten!"); st.toast("Roster Overwritten!")
-                            else: st.error("Failed to update settings.")
-                    else: st.warning("No valid names found.")
-                except Exception as e: st.error(f"Error reading CSV: {e}")
+                            if update_roster(new_names):
+                                st.success("✅ Roster overwritten!"); st.toast("Roster Overwritten!")
+                            else:
+                                st.error("Failed to update settings.")
+                    else:
+                        st.warning("No valid names found.")
+                except Exception as e:
+                    st.error(f"Error reading CSV: {e}")
 
     # --- TAB 2: MEMBER INFORMATION ---
     with tab2:
         st.header("Member Information Database")
         # Updated to clear cache
-        if st.button("🔄 Refresh Member Data"): 
+        if st.button("🔄 Refresh Member Data"):
             st.cache_data.clear()
             st.rerun()
-            
+
         df_members = get_data("Member Information")
         if not df_members.empty:
             search_mem = st.text_input("🔍 Search Members:")
             if search_mem:
                 mask = df_members.apply(lambda x: x.astype(str).str.contains(search_mem, case=False).any(), axis=1)
                 display_df = df_members[mask]
-            else: display_df = df_members
+            else:
+                display_df = df_members
             st.metric("Total Members", len(display_df))
             st.dataframe(display_df, use_container_width=True)
-        else: st.info("No member information found.")
+        else:
+            st.info("No member information found.")
 
     # --- TAB 3: PNM RANKINGS ---
     with tab3:
         st.header("PNM Ranking Management")
-        
+
         # --- ADDED REFRESH BUTTON FOR PNM DATA ---
         if st.button("🔄 Refresh PNM & Ranking Data"):
             st.cache_data.clear()
@@ -417,8 +442,8 @@ else:
 
         # Load Data
         df_votes = get_data("PNM Rankings")
-        df_pnms_master = get_data("PNM Information") # Load master list for cross-referencing
-        
+        df_pnms_master = get_data("PNM Information")  # Load master list for cross-referencing
+
         # Identify ID column in votes
         id_col_votes = None
         if not df_votes.empty:
@@ -428,23 +453,23 @@ else:
             # --- VALIDATION LOGIC START ---
             st.markdown("### Ranking Validation Check")
             st.info("Set the minimum required rankings per PNM below. The system will check if every PNM in the database meets this threshold.")
-            
+
             c_val1, c_val2 = st.columns([1, 2])
             with c_val1:
                 min_rankings_req = st.number_input("Minimum Rankings Required", min_value=1, value=3, step=1)
-            
+
             # Perform Check
             validation_passed = False
-            
+
             # 1. Get IDs and Names from Master List
             master_id_col = next((c for c in df_pnms_master.columns if 'pnm id' in c.lower() or 'id' == c.lower()), None)
             master_name_col = next((c for c in df_pnms_master.columns if 'pnm name' in c.lower() or 'full name' in c.lower()), None)
-            
+
             if not df_pnms_master.empty and master_id_col:
                 # Calculate counts from votes dataframe
                 vote_counts = df_votes[id_col_votes].astype(str).str.strip().value_counts().reset_index()
                 vote_counts.columns = ['PNM ID', 'Vote Count']
-                
+
                 # Prepare Master list
                 validation_df = df_pnms_master[[master_id_col]].copy()
                 validation_df.columns = ['PNM ID']
@@ -452,16 +477,16 @@ else:
                     validation_df['Name'] = df_pnms_master[master_name_col]
                 else:
                     validation_df['Name'] = "Unknown"
-                
+
                 validation_df['PNM ID'] = validation_df['PNM ID'].astype(str).str.strip()
-                
+
                 # Merge Master with Vote Counts (Left Join ensures we see 0s)
                 validation_df = validation_df.merge(vote_counts, on='PNM ID', how='left').fillna(0)
                 validation_df['Vote Count'] = validation_df['Vote Count'].astype(int)
-                
+
                 # Filter for failures
                 failed_pnms = validation_df[validation_df['Vote Count'] < min_rankings_req]
-                
+
                 if not failed_pnms.empty:
                     st.error(f"{len(failed_pnms)} PNM(s) have fewer than {min_rankings_req} rankings!")
                     st.dataframe(failed_pnms.sort_values(by='Vote Count'), use_container_width=True, hide_index=True)
@@ -478,7 +503,7 @@ else:
                     st.error(f"Some active IDs have fewer than {min_rankings_req} votes.")
                 else:
                     st.success("All currently voted-on PNMs meet requirements.")
-            
+
             st.divider()
             # --- VALIDATION LOGIC END ---
 
@@ -489,23 +514,23 @@ else:
                     group_cols = [id_col_votes]
                     name_col_votes = next((c for c in df_votes.columns if 'pnm name' in c.lower()), None)
                     if name_col_votes: group_cols.append(name_col_votes)
-                    
+
                     avg_df = df_votes.groupby(group_cols)['Score'].mean().reset_index()
                     avg_df.rename(columns={'Score': 'Calculated Average'}, inplace=True)
                     avg_df = avg_df.sort_values(by='Calculated Average', ascending=False)
-                    
+
                     st.subheader("Sync Rankings")
                     st.write(f"Ready to process {len(df_votes)} total votes across {len(avg_df)} unique PNMs.")
-                    
+
                     if st.button("Sync Rankings to PNM Sheet"):
                         with st.spinner("Syncing..."):
                             rankings_map = {str(row[id_col_votes]).strip(): round(row['Calculated Average'], 2) for idx, row in avg_df.iterrows()}
                             count = batch_update_pnm_rankings(rankings_map)
                         st.success(f"✅ Auto-synced {count} PNM rankings!")
-                    
+
                     st.divider()
                     st.subheader("Raw Ranking Data")
-                    
+
                     # --- ADDED SEARCH BAR FOR RAW RANKINGS ---
                     rank_search = st.text_input("🔍 Search Raw Rankings:", key="raw_rank_search")
                     if rank_search:
@@ -513,26 +538,30 @@ else:
                         display_votes = df_votes[df_votes.astype(str).apply(lambda x: x.str.contains(rank_search, case=False).any(), axis=1)]
                     else:
                         display_votes = df_votes
-                    
+
                     st.dataframe(display_votes, use_container_width=True)
                     # -----------------------------------------
 
-                else: st.error("Missing 'PNM ID' or 'Score' columns in Ranking Sheet.")
-            except Exception as e: st.error(f"Error processing rankings: {e}")
-        else: st.info("No votes found in 'PNM Rankings' sheet yet (or ID column missing).")
-        
+                else:
+                    st.error("Missing 'PNM ID' or 'Score' columns in Ranking Sheet.")
+            except Exception as e:
+                st.error(f"Error processing rankings: {e}")
+        else:
+            st.info("No votes found in 'PNM Rankings' sheet yet (or ID column missing).")
+
         st.divider()
         st.subheader("Current PNM Database")
         if not df_pnms_master.empty:
             pnm_search = st.text_input("🔍 Search PNM Database:")
             display_pnm = df_pnms_master[df_pnms_master.astype(str).apply(lambda x: x.str.contains(pnm_search, case=False).any(), axis=1)] if pnm_search else df_pnms_master
             st.dataframe(display_pnm, use_container_width=True)
-        else: st.info("No PNM data found.")  
+        else:
+            st.info("No PNM data found.")
 
     # --- TAB 4: VIEW BUMP TEAMS ---
     with tab4:
         st.header("Bump Team Management")
-        
+
         # --- ADDED REFRESH BUTTON FOR BUMP TEAMS ---
         if st.button("🔄 Refresh Bump Teams"):
             st.cache_data.clear()
@@ -541,15 +570,15 @@ else:
 
         df_teams = get_data("Bump Teams")
         if not df_teams.empty:
-            id_col = next((c for c in df_teams.columns if 'team id' in c.lower() or 'id' in c.lower()), df_teams.columns[4] if len(df_teams.columns)>4 else None)
-            creator_col = next((c for c in df_teams.columns if 'creator' in c.lower()), df_teams.columns[1] if len(df_teams.columns)>1 else None)
-            partners_col = next((c for c in df_teams.columns if 'partner' in c.lower()), df_teams.columns[2] if len(df_teams.columns)>2 else None)
+            id_col = next((c for c in df_teams.columns if 'team id' in c.lower() or 'id' in c.lower()), df_teams.columns[4] if len(df_teams.columns) > 4 else None)
+            creator_col = next((c for c in df_teams.columns if 'creator' in c.lower()), df_teams.columns[1] if len(df_teams.columns) > 1 else None)
+            partners_col = next((c for c in df_teams.columns if 'partner' in c.lower()), df_teams.columns[2] if len(df_teams.columns) > 2 else None)
             rank_col = next((c for c in df_teams.columns if 'rank' in c.lower()), None)
 
             if id_col and creator_col:
                 df_teams['display_label'] = df_teams.apply(lambda x: f"Team {x[id_col]} | {x[creator_col]}, {x.get(partners_col, '')}", axis=1)
                 t1, t2 = st.tabs(["Single Team Recruiter Ranking Update", "Bulk Team Recruiter Ranking Upload (CSV)"])
-                
+
                 with t1:
                     c1, c2, c3 = st.columns([3, 1, 1])
                     with c1:
@@ -557,8 +586,10 @@ else:
                         sel_id = df_teams[df_teams['display_label'] == sel_label][id_col].values[0]
                     with c2:
                         cur_rank = df_teams[df_teams[id_col] == sel_id][rank_col].values[0] if rank_col else 1
-                        try: init_val = int(cur_rank)
-                        except: init_val = 1
+                        try:
+                            init_val = int(cur_rank)
+                        except:
+                            init_val = 1
                         new_rank = st.number_input(f"Assign Rank:", min_value=1, value=init_val, key="team_rank_input")
                     with c3:
                         st.markdown("<br>", unsafe_allow_html=True)
@@ -575,29 +606,34 @@ else:
                             b_id = next((c for c in df_b.columns if 'id' in c), None)
                             b_name = next((c for c in df_b.columns if 'name' in c or 'creator' in c), None)
                             b_rank = next((c for c in df_b.columns if 'rank' in c), None)
-                            
+
                             if b_rank and (b_id or b_name):
                                 bulk_map = {}
                                 name_map = dict(zip(df_teams[creator_col].astype(str).str.strip().str.lower(), df_teams[id_col].astype(str))) if b_name else {}
                                 for _, r in df_b.iterrows():
                                     rv = r[b_rank]
                                     tid = None
-                                    if b_id and pd.notna(r[b_id]): tid = str(int(r[b_id])) if str(r[b_id]).replace('.','').isdigit() else str(r[b_id])
-                                    elif b_name and pd.notna(r[b_name]): tid = name_map.get(str(r[b_name]).strip().lower())
+                                    if b_id and pd.notna(r[b_id]):
+                                        tid = str(int(r[b_id])) if str(r[b_id]).replace('.', '').isdigit() else str(r[b_id])
+                                    elif b_name and pd.notna(r[b_name]):
+                                        tid = name_map.get(str(r[b_name]).strip().lower())
                                     if tid: bulk_map[tid] = rv
                                 if bulk_map:
                                     cnt = batch_update_team_rankings(bulk_map)
                                     st.success(f"✅ Updated {cnt} teams!"); st.rerun()
-                                else: st.warning("No valid teams found.")
-                            else: st.error("CSV missing required columns.")
-                        except Exception as e: st.error(f"Error: {e}")
-            
+                                else:
+                                    st.warning("No valid teams found.")
+                            else:
+                                st.error("CSV missing required columns.")
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+
             st.divider()
             st.subheader("Current Bump Teams List")
-            
+
             # --- ADDED SEARCH BAR HERE ---
             team_search = st.text_input("🔍 Search Bump Teams:", key="bump_team_search")
-            
+
             if team_search:
                 display_teams = df_teams[df_teams.astype(str).apply(lambda x: x.str.contains(team_search, case=False).any(), axis=1)]
             else:
@@ -605,15 +641,16 @@ else:
             # -----------------------------
 
             st.dataframe(display_teams.drop(columns=['display_label'], errors='ignore'), use_container_width=True)
-        else: st.info("No bump teams found yet.")
-            
+        else:
+            st.info("No bump teams found yet.")
+
     # --- TAB 5 & 6: EXCUSES & CONNECTIONS ---
     with tab5:
         st.header("Member Party Excuses")
-        if st.button("🔄 Refresh Excuses"): 
+        if st.button("🔄 Refresh Excuses"):
             st.cache_data.clear()
             st.rerun()
-        
+
         df_ex = get_data("Party Excuses")
         if not df_ex.empty:
             # --- ADDED SEARCH BAR FOR EXCUSES ---
@@ -623,16 +660,17 @@ else:
             else:
                 display_ex = df_ex
             # ------------------------------------
-            
+
             st.dataframe(display_ex, use_container_width=True)
-        else: st.info("No excuses found.")
+        else:
+            st.info("No excuses found.")
 
     with tab6:
         st.header("Prior Member - PNM Connections")
-        if st.button("🔄 Refresh Connections"): 
+        if st.button("🔄 Refresh Connections"):
             st.cache_data.clear()
             st.rerun()
-        
+
         df_conn = get_data("Prior Connections")
         if not df_conn.empty:
             # --- ADDED SEARCH BAR FOR CONNECTIONS ---
@@ -644,19 +682,20 @@ else:
             # ----------------------------------------
 
             st.dataframe(display_conn, use_container_width=True)
-        else: st.info("No prior connections found.")
-            
+        else:
+            st.info("No prior connections found.")
+
     # --- TAB 7: RUN MATCHING ---
     with tab7:
         st.header("Run Matching Algorithm")
-        
+
         st.subheader("Matching Algorithm Settings")
-        
+
         # --- MODIFIED: Use the detected count from 'Party Information' ---
-        num_parties = get_max_party_count() # Simplified, get_max_party_count handles the try/except/default internally
+        num_parties = get_max_party_count()  # Simplified, get_max_party_count handles the try/except/default internally
 
         st.info(f"**Total Parties:** {num_parties} (Detected from 'Party Information' sheet)")
-        
+
         # User input for Matches per Team and Rounds
         matches_per_team = st.number_input("Matches per Bump Team (Capacity)", min_value=1, value=2)
         num_rounds = st.number_input("Rounds per Party", min_value=1, value=4)
@@ -664,20 +703,20 @@ else:
         is_bump_order_set = "y" if bump_order_set == "Yes" else "n"
 
         st.divider()
-        
+
         # ADDED: User Input for PNM Party Assignments
         st.subheader("Upload PNM Party Assignments")
         party_assignment_file = st.file_uploader("Upload CSV containing 'PNM ID', 'PNM Name', and 'Party'", type=["csv"])
-        
+
         # --- PREVIEW LOGIC ADDED HERE ---
         if party_assignment_file:
             try:
                 # Read just for preview
                 df_preview = pd.read_csv(party_assignment_file)
-                
+
                 # IMPORTANT: Reset file pointer to the beginning so the algorithm can read it again later
                 party_assignment_file.seek(0)
-                
+
                 with st.expander("Preview Uploaded Data (Click to Expand)"):
                     st.write(f"**Rows found:** {len(df_preview)}")
                     st.dataframe(df_preview.head(), use_container_width=True)
@@ -698,11 +737,11 @@ else:
 
                     if any(df is None for df in [bump_teams, party_excuses, pnm_intial_interest, member_interest, member_pnm_no_match]):
                         st.stop()
-                    
+
                     # Clean Columns for Google Sheet Data
                     for df in [bump_teams, party_excuses, pnm_intial_interest, member_interest, member_pnm_no_match]:
                         df.columns = df.columns.str.strip()
-                    
+
                     # Load NLP & Geo Resources
                     model = load_model()
                     city_coords_map, all_city_keys = load_city_database()
@@ -712,37 +751,35 @@ else:
                         # Read the uploaded assignment CSV
                         assignments_df = pd.read_csv(party_assignment_file)
                         assignments_df.columns = assignments_df.columns.str.strip()
-                        
+
                         # Validate required columns
                         required_assignment_cols = ['PNM ID', 'Party']
                         if not all(col in assignments_df.columns for col in required_assignment_cols):
                             st.error(f"Uploaded CSV must contain columns: {required_assignment_cols}. Found: {list(assignments_df.columns)}")
                             st.stop()
-                        
+
                         # Prepare for merge (Ensure IDs are strings for matching)
                         pnm_intial_interest['PNM ID'] = pnm_intial_interest['PNM ID'].astype(str).str.strip()
                         assignments_df['PNM ID'] = assignments_df['PNM ID'].astype(str).str.strip()
-                        
+
                         # Merge Google Sheet Data with Party Assignments
                         # Inner merge filters to only include PNMs present in the uploaded CSV
                         pnm_intial_interest = pnm_intial_interest.merge(
-                            assignments_df[['PNM ID', 'Party']], 
-                            on='PNM ID', 
+                            assignments_df[['PNM ID', 'Party']],
+                            on='PNM ID',
                             how='inner'
                         )
-                        
+
                         if pnm_intial_interest.empty:
                             st.error("No matches found between the uploaded PNM Assignments and the PNM Information database. Check your PNM IDs.")
                             st.stop()
-                            
+
                         # Ensure 'Party' is numeric for the loop
                         pnm_intial_interest['Party'] = pd.to_numeric(pnm_intial_interest['Party'], errors='coerce').fillna(0).astype(int)
 
                     except Exception as e:
                         st.error(f"Error reading or processing the Party Assignments CSV: {e}")
                         st.stop()
-
-                    # (Previous logic for tiling and random shuffling assignments has been removed)
 
                     # Standardize PNM Columns
                     pnm_col_map = {
@@ -755,12 +792,12 @@ else:
                     }
                     pnm_clean = pnm_intial_interest.rename(columns=pnm_col_map)
                     df_mem = member_interest.copy()
-                    
+
                     # --- CLUSTERING LOGIC ---
                     all_coords, geo_tracker = [], []
                     for idx, row in df_mem.iterrows():
                         lat, lon = get_coords_offline(row.get('Hometown'), city_coords_map, all_city_keys)
-                        if lat: 
+                        if lat:
                             all_coords.append([radians(lat), radians(lon)])
                             geo_tracker.append({'type': 'mem', 'id': row['Sorority ID'], 'hometown': row['Hometown']})
                     for idx, row in pnm_clean.iterrows():
@@ -781,8 +818,10 @@ else:
                         for i, label in enumerate(geo_labels):
                             group_name = geo_groups[label][0]
                             tracker = geo_tracker[i]
-                            if tracker['type'] == 'mem': mem_geo_tags[tracker['id']] = group_name
-                            else: pnm_geo_tags[tracker['id']] = group_name
+                            if tracker['type'] == 'mem':
+                                mem_geo_tags[tracker['id']] = group_name
+                            else:
+                                pnm_geo_tags[tracker['id']] = group_name
 
                     all_terms_list, mem_interest_map, pnm_interest_map = [], [], []
                     cols_to_extract = ['Major', 'Minor', 'Hobbies', 'College Involvement', 'High School Involvement']
@@ -821,7 +860,7 @@ else:
 
                     member_interest['attributes_for_matching'] = finalize_attributes(df_mem, 'Sorority ID', mem_geo_tags, mem_interest_map)
                     pnm_intial_interest['attributes_for_matching'] = finalize_attributes(pnm_clean, 'PNM ID', pnm_geo_tags, pnm_interest_map)
-                    
+
                     # --- STEP 2: CALCULATE GLOBAL RANKING STATS (PNM & RECRUITER) ---
                     try:
                         # 1. PNM Stats
@@ -831,20 +870,20 @@ else:
                         all_ranks = all_ranks.fillna(min_obs)
                         global_max = all_ranks.max()
                         global_min = all_ranks.min()
-                        if global_max == global_min: global_max += 1.0 
-                        
+                        if global_max == global_min: global_max += 1.0
+
                         # 2. Recruiter (Team) Stats
                         all_team_ranks = pd.to_numeric(bump_teams['Ranking'], errors='coerce')
                         min_t_obs = all_team_ranks.min()
                         if pd.isna(min_t_obs): min_t_obs = 1.0
-                        all_team_ranks = all_team_ranks.fillna(4.0) # Default if missing
+                        all_team_ranks = all_team_ranks.fillna(4.0)  # Default if missing
                         t_global_max = all_team_ranks.max()
                         t_global_min = all_team_ranks.min()
                         if t_global_max == t_global_min: t_global_max += 1.0
-                        
+
                     except Exception as e:
                         st.error(f"Error calculating global ranking stats: {e}")
-                        global_max, global_min = 5.0, 1.0 
+                        global_max, global_min = 5.0, 1.0
                         t_global_max, t_global_min = 4.0, 1.0
 
                     # --- STEP 3: CORE MATCHING LOGIC ---
@@ -874,22 +913,26 @@ else:
                     all_member_traits = member_interest['attributes_for_matching'].str.split(', ').explode()
                     trait_freq = all_member_traits.value_counts()
                     trait_weights = (len(member_interest) / trait_freq).to_dict()
-                    
+
                     # Conversion helper for strings from GSheet
                     def to_float(val, default=1.0):
-                        try: return float(val)
-                        except: return default
-                    
+                        try:
+                            return float(val)
+                        except:
+                            return default
+
                     def to_int(val, default=4):
-                        try: return int(val)
-                        except: return default
+                        try:
+                            return int(val)
+                        except:
+                            return default
 
                     # List to store individual file data for later download buttons
                     individual_party_files = []
-                    
+
                     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
                         for party in range(1, int(num_parties) + 1):
-                            
+
                             pnms_df = pnm_intial_interest[pnm_intial_interest['Party'] == party].copy()
                             if pnms_df.empty: continue
 
@@ -899,20 +942,20 @@ else:
                             for i, row in enumerate(pnm_records):
                                 p_attrs = set(str(row['attributes_for_matching']).split(', '))
                                 p_rank_val = to_float(row.get("Average Recruit Rank", 1.0))
-                                
+
                                 # --- AGNOSTIC BONUS CALCULATION ---
                                 safe_rank = max(global_min, min(p_rank_val, global_max))
                                 relative_strength = (safe_rank - global_min) / (global_max - global_min)
-                                RANKING_WEIGHT = 3.0 
+                                RANKING_WEIGHT = 3.0
                                 pnm_bonus = relative_strength * RANKING_WEIGHT
                                 # ----------------------------------
 
                                 pnm_list.append({
-                                    'idx': i, 
-                                    'id': row['PNM ID'], 
+                                    'idx': i,
+                                    'id': row['PNM ID'],
                                     'name': row.get('PNM Name', row.get('Full Name')),
-                                    'attrs': p_attrs, 
-                                    'rank': p_rank_val, 
+                                    'attrs': p_attrs,
+                                    'rank': p_rank_val,
                                     'bonus': pnm_bonus,
                                     'node_id': f"p_{i}"
                                 })
@@ -925,8 +968,10 @@ else:
                             for raw_idx, row in enumerate(bump_teams.to_dict('records')):
                                 submitter = row["Creator Name"]
                                 partners_str = str(row.get("Bump Partners", ""))
-                                if partners_str.lower() == 'nan': partners = []
-                                else: partners = [p.strip() for p in re.split(r'[,;]\s*', partners_str) if p.strip()]
+                                if partners_str.lower() == 'nan':
+                                    partners = []
+                                else:
+                                    partners = [p.strip() for p in re.split(r'[,;]\s*', partners_str) if p.strip()]
 
                                 current_members = [submitter] + partners
                                 missing_members = [m for m in current_members if m in party_excused_names]
@@ -934,12 +979,12 @@ else:
                                 if missing_members:
                                     broken_teams_list.append({'members': current_members, 'missing': missing_members})
                                 else:
-                                    t_rank_val = to_float(row.get("Ranking", t_global_max)) # Default to worst rank if missing
-                                    
+                                    t_rank_val = to_float(row.get("Ranking", t_global_max))  # Default to worst rank if missing
+
                                     # --- RECRUITER AGNOSTIC BONUS ---
                                     safe_t_rank = max(t_global_min, min(t_rank_val, t_global_max))
                                     team_rel_strength = (t_global_max - safe_t_rank) / (t_global_max - t_global_min)
-                                    TEAM_WEIGHT = 1.5 
+                                    TEAM_WEIGHT = 1.5
                                     t_bonus = team_rel_strength * TEAM_WEIGHT
                                     # --------------------------------
 
@@ -952,13 +997,13 @@ else:
 
                             # --- Capacity Checks ---
                             total_capacity = len(team_list) * matches_per_team
-                            
+
                             # NEW VALIDATION
                             if len(pnm_list) > total_capacity:
                                 warning_msg = (f"**Party {party} Warning**: Not enough capacity! "
                                                f"{len(pnm_list)} PNMs vs {total_capacity} Slots ({len(team_list)} Teams × {matches_per_team}). "
                                                f"Unmatched PNMs will appear in the results.\n\n")
-                                
+
                                 # Check for excused teams
                                 if broken_teams_list:
                                     warning_msg += f"- **Excused Teams:** {len(broken_teams_list)} team(s) removed due to excuses:\n"
@@ -969,34 +1014,34 @@ else:
                                 else:
                                     warning_msg += "No teams were removed due to excuses for this party.\n"
 
-                                warning_msg += "\n" # Spacing
-                                
+                                warning_msg += "\n"  # Spacing
+
                                 # Check for relevant No-Match restrictions
                                 active_team_members = set()
                                 for t in team_list:
                                     active_team_members.update(t['members'])
-                                
+
                                 pnm_names_in_party = {p['name'] for p in pnm_list}
-                                
+
                                 relevant_conflicts = []
                                 for (m_name, p_name) in no_match_pairs:
                                     if p_name in pnm_names_in_party and m_name in active_team_members:
                                         relevant_conflicts.append(f"Sorority Member {m_name} and PNM {p_name}")
-                                
+
                                 if relevant_conflicts:
                                     warning_msg += f"- **Active No-Match Constraints:** {len(relevant_conflicts)} pair(s) found:\n"
                                     for conf in relevant_conflicts:
                                         warning_msg += f"  - {conf}\n"
                                 else:
                                     warning_msg += "No conflicts found between present PNMs and Members.\n"
-                                    
+
                                 st.warning(warning_msg)
 
                             potential_pairs = []
                             for p_data in pnm_list:
                                 for t_data in team_list:
                                     if any((m, p_data['name']) in no_match_pairs for m in t_data['members']): continue
-                                    
+
                                     score = 0
                                     reasons_list = []
                                     for m_id, m_name in zip(t_data['member_ids'], t_data['members']):
@@ -1006,7 +1051,7 @@ else:
                                         if shared:
                                             score += sum(trait_weights.get(t, 1.0) for t in shared)
                                             reasons_list.append(f"{p_data['name']} has {', '.join(shared)} with {m_name}.")
-                                    
+
                                     total_score = score + t_data['bonus'] + p_data['bonus']
                                     final_cost = 1 / (1 + total_score)
                                     potential_pairs.append({
@@ -1066,7 +1111,8 @@ else:
                                                     if match_info:
                                                         global_flow_results.append({
                                                             'PNM ID': p_data['id'], 'PNM Name': p_data['name'],
-                                                            'Bump Team Members': match_info['team_members'], 'Match Cost': round(match_info['cost'], 4),
+                                                            'Bump Team Members': match_info['team_members'],
+                                                            'Match Cost': round(match_info['cost'], 4),
                                                             'Reason': match_info['reasons']
                                                         })
                                                         assignments_map_flow[match_info['t_idx']].append(match_info)
@@ -1112,7 +1158,7 @@ else:
 
                                     raw_rgl = team_data['row_data'].get('RGL', '')
                                     team_rgl_name = "" if pd.isna(raw_rgl) or str(raw_rgl).lower() == 'nan' else str(raw_rgl).strip()
-                                    
+
                                     valid_members = []
                                     for m_id, m_name in zip(team_data['member_ids'], team_data['members']):
                                         if m_id: valid_members.append({'id': m_id, 'name': m_name})
@@ -1144,12 +1190,12 @@ else:
                                                     m_attrs = member_attr_cache.get(m['id'], set())
                                                     shared = p['p_attrs'].intersection(m_attrs)
                                                     score = sum(trait_weights.get(t, 1.0) for t in shared)
-                                                    base_cost = int((1/(1+score))*10000)
+                                                    base_cost = int((1 / (1 + score)) * 10000)
                                                     final_cost = base_cost + 50000 if is_repeat else base_cost
                                                     reason = ", ".join(shared) if shared else "Rotation"
                                                     if is_repeat: reason += " (Repeat)"
                                                     sub_G.add_edge(f"p_{p['p_id']}", f"m_{m['id']}", capacity=1, weight=final_cost, reason=reason)
-                                            
+
                                             try:
                                                 sub_flow = nx.min_cost_flow(sub_G)
                                                 for p in assigned_pnms:
@@ -1160,10 +1206,10 @@ else:
                                                                 # Fix: Keep ID as string to match Google Sheets data format
                                                                 raw_id = tgt.replace("m_", "")
                                                                 m_name = next((m['name'] for m in valid_members if str(m['id']) == raw_id), "Unknown")
-                                                                
+
                                                                 edge_d = sub_G.get_edge_data(p_node, tgt)
-                                                                calc_cost = (edge_d.get('weight', 10000) - (50000 if edge_d.get('weight',0) > 40000 else 0)) / 10000.0
-                                                                
+                                                                calc_cost = (edge_d.get('weight', 10000) - (50000 if edge_d.get('weight', 0) > 40000 else 0)) / 10000.0
+
                                                                 rotation_output.append({
                                                                     'Round': round_num, 'Team ID': t_idx, 'Team Members': team_data['joined_names'],
                                                                     'PNM ID': p['p_id'], 'PNM Name': p['p_name'], 'Matched Member': m_name,
@@ -1173,7 +1219,7 @@ else:
                                                                 history.add((str(p['p_id']), str(raw_id)))
                                             except nx.NetworkXUnfeasible:
                                                 rotation_output.append({'Round': round_num, 'Team ID': t_idx, 'PNM Name': "FLOW FAIL", 'Reason': "Unfeasible"})
-                                            
+
                                         elif method == 'greedy':
                                             candidates = []
                                             for p in assigned_pnms:
@@ -1187,9 +1233,9 @@ else:
                                                     reason = ", ".join(shared) if shared else "Rotation"
                                                     if is_repeat: reason += " (Repeat)"
                                                     candidates.append((final_score, p, m, reason, is_repeat))
-                                            
+
                                             candidates.sort(key=lambda x: x[0], reverse=True)
-                                            
+
                                             round_pnm_done, round_mem_done = set(), set()
                                             for sc, p, m, rs, is_rep in candidates:
                                                 if p['p_id'] not in round_pnm_done and m['id'] not in round_mem_done:
@@ -1197,7 +1243,7 @@ else:
                                                     rotation_output.append({
                                                         'Round': round_num, 'Team ID': t_idx, 'Team Members': team_data['joined_names'],
                                                         'PNM ID': p['p_id'], 'PNM Name': p['p_name'], 'Matched Member': m['name'],
-                                                        'Match Cost': round(1.0/(1.0+real_score), 4), 'Reason': f"Common: {rs}" if real_score > 0 else "Greedy Fill"
+                                                        'Match Cost': round(1.0 / (1.0 + real_score), 4), 'Reason': f"Common: {rs}" if real_score > 0 else "Greedy Fill"
                                                     })
                                                     round_pnm_done.add(p['p_id']); round_mem_done.add(m['id'])
                                                     history.add((str(p['p_id']), str(m['id'])))
@@ -1260,42 +1306,42 @@ else:
                                     summary_df.to_excel(writer, sheet_name="Summary_Comparison", index=False); auto_adjust_columns(writer, "Summary_Comparison", summary_df)
                                     df_glob_flow.to_excel(writer, sheet_name="Global_Matches_Flow", index=False); auto_adjust_columns(writer, "Global_Matches_Flow", df_glob_flow)
                                     df_glob_greedy.to_excel(writer, sheet_name="Global_Matches_Greedy", index=False); auto_adjust_columns(writer, "Global_Matches_Greedy", df_glob_greedy)
-                                    
+
                                     if not df_rot_flow.empty:
                                         if is_bump_order_set == "n":
                                             # MODIFIED: Drop 'Team ID' and 'Team Members' for Rotation Flow export
                                             rot_flow_out = df_rot_flow.drop(columns=['Team ID', 'Team Members'], errors='ignore')
                                             rot_flow_out.to_excel(writer, sheet_name="Rotation_Flow", index=False)
                                             auto_adjust_columns(writer, "Rotation_Flow", rot_flow_out)
-                                            
+
                                         if not df_bump_flow.empty: df_bump_flow.to_excel(writer, sheet_name="Bump_Logistics_Flow", index=False); auto_adjust_columns(writer, "Bump_Logistics_Flow", df_bump_flow)
                                     else:
                                         # MODIFIED: Drop 'Team ID', 'Round', and 'Team Members' for Round 1 Matches
                                         r1 = df_rot_flow[df_rot_flow['Round'] == 1].drop(columns=['Team ID', 'Round', 'Team Members'], errors='ignore')
                                         r1.to_excel(writer, sheet_name="Round_1_Matches_Flow", index=False)
                                         auto_adjust_columns(writer, "Round_1_Matches_Flow", r1)
-                                    
+
                                     if not df_rot_greedy.empty:
                                         if is_bump_order_set == "n":
                                             # MODIFIED: Drop 'Team ID' and 'Team Members' for Rotation Greedy export
                                             rot_greedy_out = df_rot_greedy.drop(columns=['Team ID', 'Team Members'], errors='ignore')
                                             rot_greedy_out.to_excel(writer, sheet_name="Rotation_Greedy", index=False)
                                             auto_adjust_columns(writer, "Rotation_Greedy", rot_greedy_out)
-                                            
+
                                         if not df_bump_greedy.empty: df_bump_greedy.to_excel(writer, sheet_name="Bump_Logistics_Greedy", index=False); auto_adjust_columns(writer, "Bump_Logistics_Greedy", df_bump_greedy)
                                     else:
                                         # MODIFIED: Drop 'Team ID', 'Round', and 'Team Members' for Round 1 Matches
                                         r1 = df_rot_greedy[df_rot_greedy['Round'] == 1].drop(columns=['Team ID', 'Round', 'Team Members'], errors='ignore')
                                         r1.to_excel(writer, sheet_name="Round_1_Matches_Greedy", index=False)
                                         auto_adjust_columns(writer, "Round_1_Matches_Greedy", r1)
-                                
+
                                 # Save the output content to variables for later
                                 file_content = output.getvalue()
                                 file_name_x = f"Party_{party}_Match_Analysis.xlsx"
-                                
+
                                 # Add to zip
                                 zf.writestr(file_name_x, file_content)
-                                
+
                                 # Add to individual list
                                 individual_party_files.append((f"Party {party}", file_name_x, file_content))
 
@@ -1304,14 +1350,14 @@ else:
                         "zip_data": zip_buffer.getvalue(),
                         "individual_files": individual_party_files
                     }
-                    
+
                     st.success("Matching Complete!")
-        
+
         # --- DISPLAY DOWNLOAD BUTTONS (PERSISTENT) ---
         if st.session_state.match_results:
             st.divider()
             st.subheader("Download Results")
-            
+
             # 1. Main ZIP Download
             st.download_button(
                 label="Download All Matches (ZIP)",
@@ -1319,23 +1365,23 @@ else:
                 file_name="recruitment_matches.zip",
                 mime="application/zip"
             )
-            
+
             # 2. Individual Downloads
             st.write("### Individual Party Sheets")
-            
+
             files = st.session_state.match_results["individual_files"]
-            
+
             # Define how many buttons you want per row (e.g., 4)
             cols_per_row = 4
-            
+
             # Loop through the files in chunks to create rows
             for i in range(0, len(files), cols_per_row):
                 # Get the batch of files for this row
-                row_files = files[i : i + cols_per_row]
-                
+                row_files = files[i: i + cols_per_row]
+
                 # Create the columns for this row
                 cols = st.columns(cols_per_row)
-                
+
                 # Place buttons inside the columns
                 for idx, (label, fname, data) in enumerate(row_files):
                     with cols[idx]:
@@ -1347,3 +1393,43 @@ else:
                             key=f"dl_btn_{fname}",
                             use_container_width=True  # This makes the button stretch to fill the column
                         )
+
+    # --- TAB 8: VIEW MATCH RESULTS (NEW) ---
+    with tab8:
+        st.header("View Generated Match Results")
+
+        if "match_results" not in st.session_state or not st.session_state.match_results:
+            st.info("⚠️ No results found. Please go to the 'Run Matching' tab and execute the algorithm first.")
+        else:
+            files = st.session_state.match_results["individual_files"]
+            if not files:
+                st.warning("Matches were run, but no party files were generated. Check your inputs.")
+            else:
+                # Create a selector for the party file
+                # files is a list of tuples: (Label, Filename, Data)
+                file_options = {f[0]: f[2] for f in files}  # Map Label -> Data
+
+                col_sel1, col_sel2 = st.columns([1, 3])
+                with col_sel1:
+                    selected_party_label = st.selectbox("Select Party to View:", list(file_options.keys()))
+
+                if selected_party_label:
+                    # Load the bytes into an ExcelFile object
+                    excel_data = BytesIO(file_options[selected_party_label])
+                    try:
+                        xls = pd.ExcelFile(excel_data)
+                        sheet_names = xls.sheet_names
+
+                        with col_sel2:
+                            selected_sheet = st.selectbox("Select View (Sheet):", sheet_names)
+
+                        st.divider()
+
+                        # Read and Display
+                        df_view = pd.read_excel(xls, sheet_name=selected_sheet)
+
+                        st.markdown(f"### {selected_party_label} - {selected_sheet}")
+                        st.dataframe(df_view, use_container_width=True)
+
+                    except Exception as e:
+                        st.error(f"Error reading Excel file: {e}")
