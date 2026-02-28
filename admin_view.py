@@ -1230,7 +1230,6 @@ else:
     # --- TAB 8: LIVE MATCH PREVIEW & EDIT ---
     with tab8:
         st.header("Preview Party Matches and Edit")
-        st.caption("This tab scans your Google Sheet for existing match schedules.")
 
         # 1. Connect to Google Sheets
         client = get_gspread_client()
@@ -1280,16 +1279,16 @@ else:
                     if available_parties:
                         st.divider()
                         selected_party = st.selectbox(
-                            f"Select Party to Edit ({selected_type}):", 
+                            f"Select Party to Edit:", 
                             available_parties, 
                             format_func=lambda x: f"Party {x}"
                         )
                         
                         # Construct the exact sheet title
-                        target_sheet_title = f"Party {selected_party} {selected_type}"
+                        target_sheet_title = f"Party {selected_party}"
                         
                         # 4. Load Data
-                        st.markdown(f"### Editing: {target_sheet_title}")
+                        st.markdown(f"### {target_sheet_title}")
                         
                         try:
                             worksheet = sh.worksheet(target_sheet_title)
