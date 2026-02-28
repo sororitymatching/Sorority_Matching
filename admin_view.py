@@ -634,12 +634,13 @@ else:
         st.subheader("Matching Algorithm Settings")
         num_parties = get_max_party_count() 
         st.info(f"**Total Parties:** {num_parties} (Detected from 'Party Information' sheet)")
-        
+
         # --- NEW: Party Selection for Visibility ---
         party_opts = list(range(1, num_parties + 1))
         selected_parties_to_show = st.multiselect(
-            "Select Parties to Publish to Members (Saved to Settings):", 
+            "Select Parties to Publish to Members:", 
             options=party_opts,
+            format_func=lambda x: f"Party {x}",  # <--- Added this line
             default=[] 
         )
         # -------------------------------------------
