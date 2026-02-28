@@ -302,6 +302,35 @@ def save_party_to_gsheet(party_num, df, specific_title=None):
         st.error(f"Failed to save to Google Sheet: {e}")
         return False
 
+# --- NEW FUNCTION: DELETE OLD MATCHING SHEETS ---
+def delete_old_matching_sheets():
+    """
+    Deletes previously generated matching sheets to ensure a clean slate.
+    Targets sheets starting with "Party " that contain matching keywords.
+    """
+    try:
+        gc = get_gc()
+        sh = gc.open(SHEET_NAME)
+        worksheets = sh.worksheets()
+        
+        for ws in worksheets:
+            title = ws.title.strip()
+            # Deletion Criteria:
+            # 1. Starts with "Party "
+            # 2. Second part is a number (e.g., "Party 1")
+            # 3. Contains "Matches" or "Flow" (output keywords)
+            # This protects "Party Information" and "Party Excuses" from being deleted.
+            parts = title.split()
+            if len(parts) >= 2 and parts[0] == "Party" and parts[1].isdigit():
+                if any(k in title for k in ["Matches", "Flow", "Round", "Final"]):
+                    try:
+                        robust_api_write(sh.del_worksheet, ws)
+                        time.sleep(0.5) # Throttle to respect API limits
+                    except Exception as e:
+                        print(f"Failed to delete {title}: {e}")
+    except Exception as e:
+        st.warning(f"Note: Could not clear some previous sheets (Permissions or API limit): {e}")
+
 # --- MATCHING ALGORITHM HELPERS ---
 def get_coords_offline(hometown_str, city_coords_map, all_city_keys):
     if not isinstance(hometown_str, str): return None, None
@@ -606,6 +635,11 @@ else:
             if not party_assignment_file:
                 st.error("❌ Please upload the PNM Party Assignments CSV to proceed.")
             else:
+                # --- MODIFIED: Added logic to delete previous matching sheets ---
+                with st.spinner("Clearing previous matching results..."):
+                    delete_old_matching_sheets()
+                # -------------------------------------------------------------
+                
                 with st.spinner("Processing matches..."):
                     bump_teams, party_excuses, pnm_intial_interest, member_interest, member_pnm_no_match = load_google_sheet_data(SHEET_NAME)
                     if any(df is None for df in [bump_teams, party_excuses, pnm_intial_interest, member_interest, member_pnm_no_match]): st.stop()
