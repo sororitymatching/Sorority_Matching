@@ -1211,63 +1211,99 @@ else:
         # --- TAB 8: LIVE MATCH PREVIEW & EDIT ---
     with tab8:
         st.header("Preview Party Matches and Edit")
-        if st.session_state.match_results and "preview_data" in st.session_state.match_results:
-            data_map = st.session_state.match_results["preview_data"]
-            setting = st.session_state.match_results["bump_setting"]
+        
+        # We still need the match results to know the "bump setting" logic (Round 1 vs Rotation)
+        if st.session_state.match_results:
+            setting = st.session_state.match_results.get("bump_setting", "n")
             st.info(f"Showing results for Bump Order Set: **{'Yes' if setting == 'y' else 'No'}**")
             
-            available_parties = sorted(data_map.keys())
+            # 1. Determine the suffix we are looking for in the Google Sheet
+            if setting == 'y':
+                sheet_suffix = "Round 1 Matches"
+            else:
+                sheet_suffix = "Rotation Flow"
+            
+            # 2. Connect to Google Sheets and find matching tabs
+            try:
+                # Open the workbook
+                sh = client.open("OverallMatchingInformation")
+                all_worksheets = sh.worksheets()
+                
+                # Filter tabs that match the pattern "Party X [Suffix]"
+                found_parties = []
+                for ws in all_worksheets:
+                    title = ws.title
+                    if title.startswith("Party ") and title.endswith(sheet_suffix):
+                        try:
+                            # Extract the ID: "Party 5 Round 1 Matches" -> "5"
+                            # Split by suffix to handle it cleanly
+                            prefix = title.split(f" {sheet_suffix}")[0]
+                            party_num = int(prefix.replace("Party ", ""))
+                            found_parties.append(party_num)
+                        except ValueError:
+                            continue
+                
+                available_parties = sorted(found_parties)
+                
+            except Exception as e:
+                st.error(f"Could not connect to Google Sheets: {e}")
+                available_parties = []
+
+            # 3. Display Selectbox if parties found
             if available_parties:
                 selected_party = st.selectbox("Select Party to View/Edit:", available_parties, format_func=lambda x: f"Party {x}")
                 
-                # Retrieve the full raw dataframe from session state
-                raw_df = data_map[selected_party]
+                # Construct the exact title based on selection
+                target_sheet_title = f"Party {selected_party} {sheet_suffix}"
                 
-                st.markdown(f"### Party {selected_party} Results")
-                st.caption("You can edit all columns below. Press 'Save to Google Drive' to update the specific tab in 'OverallMatchingInformation' and regenerate the downloadable files.")
+                st.markdown(f"### {target_sheet_title}")
+                st.caption("Data loaded directly from Google Sheets. Edits will save back to the Sheet and update the downloadable files.")
 
-                if not raw_df.empty:
-                    # Prepare the DataFrame for display/editing to match the Export format from Tab 7
-                    if setting == 'y':
-                        # Logic matches "Round 1 Matches" export
-                        sheet_suffix = "Round 1 Matches"
-                        # Filter for Round 1 only
-                        if 'Round' in raw_df.columns:
-                            df_to_edit = raw_df[raw_df['Round'] == 1].copy()
-                        else:
-                            df_to_edit = raw_df.copy()
-                        
-                        # Drop internal tracking columns to match the clean sheet output
-                        df_to_edit = df_to_edit.drop(columns=['Team ID', 'Round', 'Team Members'], errors='ignore')
-                        st.subheader("First Round Matches")
-                    else:
-                        # Logic matches "Rotation Flow" export
-                        sheet_suffix = "Rotation Flow"
-                        df_to_edit = raw_df.copy()
-                        # Drop internal tracking columns
-                        df_to_edit = df_to_edit.drop(columns=['Team ID', 'Team Members'], errors='ignore')
-                        st.subheader("All Rounds Matches")
+                # 4. Load the specific sheet data
+                try:
+                    worksheet = sh.worksheet(target_sheet_title)
+                    # get_all_records returns a list of dictionaries
+                    data = worksheet.get_all_records()
+                    
+                    # Convert to DataFrame
+                    # We treat all data as string to prevent type issues during editing, 
+                    # unless you have specific numeric columns you want to enforce.
+                    df_to_edit = pd.DataFrame(data)
+                except Exception as load_error:
+                    st.error(f"Error loading tab '{target_sheet_title}': {load_error}")
+                    df_to_edit = pd.DataFrame()
 
-                    # Render Data Editor (No column_config means ALL columns are editable)
+                if not df_to_edit.empty:
+                    # 5. Render Data Editor
+                    # We load it 'as-is' because the sheet should already be in the correct format 
+                    # (Round 1 or Rotation) from the previous export steps.
                     edited_df = st.data_editor(df_to_edit, use_container_width=True, hide_index=True)
 
+                    # 6. Save Logic
                     if st.button("Save to Google Drive & Regenerate Files"):
-                        # Update session state with the EDITED version
-                        st.session_state.match_results["preview_data"][selected_party] = edited_df
-                        
-                        # Construct the exact tab title to overwrite the correct sheet
-                        target_sheet_title = f"Party {selected_party} {sheet_suffix}"
-
                         with st.spinner(f"Updating '{target_sheet_title}' in Google Sheets..."):
-                            # Save using the specific title to overwrite the existing tab
+                            
+                            # A. Update the Google Sheet
+                            # We use the existing helper function, passing the exact title to overwrite
                             save_success = save_party_to_gsheet(selected_party, edited_df, specific_title=target_sheet_title)
                             
                             if save_success:
-                                # Update the ZIP file in memory to include the edits
+                                # B. Update Session State (Sync)
+                                # We sync the edited data back to session state so the ZIP generator 
+                                # (which usually pulls from state) uses the latest version.
+                                if "preview_data" in st.session_state.match_results:
+                                    st.session_state.match_results["preview_data"][selected_party] = edited_df
+
+                                # C. Regenerate ZIP
                                 regenerate_zip_from_changes()
+                                
                                 st.success(f"✅ Successfully updated '{target_sheet_title}' and regenerated download files!")
-                                time.sleep(1) 
+                                time.sleep(1)
                                 st.rerun()
-                else: st.warning("No matches found for this party.")
-            else: st.warning("No party data available.")
-        else: st.info("⚠️ Please run the matching algorithm in the **'Run Matching'** tab first to see results here.")
+                else:
+                    st.warning("This sheet appears to be empty.")
+            else:
+                st.warning(f"No sheets found matching the pattern 'Party X {sheet_suffix}'. Please run the matching algorithm first.")
+        
+        else:
+            st.info("⚠️ Please run the matching algorithm in the **'Run Matching'** tab first.")
