@@ -914,10 +914,10 @@ else:
                                     if p_name in pnm_names_in_party and m_name in active_team_members:
                                         m_id = member_name_to_id.get(m_name, "Unknown ID")
                                         p_id = pnm_name_to_id.get(p_name, "Unknown ID")
-                                        relevant_conflicts.append(f"Member **{m_name}** ({m_id}) & PNM **{p_name}** ({p_id})")
+                                        relevant_conflicts.append(f"Member **{m_name}** (ID: {m_id}) & PNM **{p_name}** (ID: {p_id})")
                                 
                                 if relevant_conflicts:
-                                    warning_msg += f"- **Active No-Match Constraints:** {len(relevant_conflicts)} pair(s) found.\n"
+                                    warning_msg += f"- **Active No-Match Constraints:** {len(relevant_conflicts)} pair(s) found.\n\n"
                                     for conflict in relevant_conflicts:
                                         warning_msg += f"  • {conflict}\n"
                                 else: 
