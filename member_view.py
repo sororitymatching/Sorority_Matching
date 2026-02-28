@@ -687,7 +687,6 @@ with tab6:
     raw_sheet_names = get_available_match_sheets()
     
     # 2. Create a clean mapping (Display Name -> Actual Sheet Name)
-    # This strips "Matches", "Flow", and "Round 1" from the name for the dropdown
     sheet_map = {
         name.replace(" Matches", "")
             .replace(" Flow", "")
@@ -698,7 +697,6 @@ with tab6:
     
     if sheet_map:
         # 3. Select Box using the Clean Names
-        # Sorting logic attempts to sort by the number at the end (e.g., "Party 1" -> 1)
         selected_display_name = st.selectbox(
             "Select Schedule:", 
             sorted(sheet_map.keys(), key=lambda x: int(x.split()[-1]) if x.split()[-1].isdigit() else x)
@@ -719,6 +717,13 @@ with tab6:
                 if data:
                     df_matches = pd.DataFrame(data[1:], columns=data[0])
                     
+                    # --- NEW: Hide Matching Cost Column ---
+                    # Drops any column that contains "cost" or "weight" (case-insensitive)
+                    cols_to_drop = [c for c in df_matches.columns if 'cost' in c.lower() or 'weight' in c.lower()]
+                    if cols_to_drop:
+                        df_matches = df_matches.drop(columns=cols_to_drop)
+                    # --------------------------------------
+
                     # 5. Search/Filter
                     st.write("---")
                     col_s1, col_s2 = st.columns([2,1])
@@ -739,3 +744,4 @@ with tab6:
                 st.error(f"Error loading matches: {e}")
     else:
         st.info("ℹ️ No match schedules have been published yet. Please check back later.")
+        
