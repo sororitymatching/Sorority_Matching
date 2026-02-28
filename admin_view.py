@@ -321,9 +321,11 @@ if not st.session_state.authenticated:
 else:
     st.success("Logged in as Admin")
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    # --- MODIFIED: ADDED "Live Match Preview" TAB ---
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "Settings & Roster", "Member Information", "PNM Information and Rankings", 
-        "View Bump Teams", "View Excuses", "View Prior Connections", "Run Matching"
+        "View Bump Teams", "View Excuses", "View Prior Connections", "Run Matching",
+        "Live Match Preview" 
     ])
 
     # --- TAB 1: SETTINGS ---
@@ -646,8 +648,6 @@ else:
         else: st.info("No prior connections found.")
             
     # --- TAB 7: RUN MATCHING ---
-
-    # --- TAB 7: RUN MATCHING ---
     with tab7:
         st.header("Run Matching Algorithm")
         
@@ -888,6 +888,9 @@ else:
                     # List to store individual file data for later download buttons
                     individual_party_files = []
                     
+                    # --- ADDED: Store raw dataframes for preview tab ---
+                    preview_results = {} 
+
                     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
                         for party in range(1, int(num_parties) + 1):
                             
@@ -1233,6 +1236,9 @@ else:
                                 df_rot_greedy = pd.DataFrame(internal_greedy_results)
                                 df_bump_flow = pd.DataFrame(bump_instruct_flow)
                                 df_bump_greedy = pd.DataFrame(bump_instruct_greedy)
+                                
+                                # --- ADDED: SAVE FOR PREVIEW ---
+                                preview_results[party] = df_rot_flow
 
                                 # --- SUMMARY CALCULATION ---
                                 flow_costs = df_glob_flow['Match Cost'].dropna()
@@ -1319,7 +1325,9 @@ else:
                     # Save to Session State for Persistence
                     st.session_state.match_results = {
                         "zip_data": zip_buffer.getvalue(),
-                        "individual_files": individual_party_files
+                        "individual_files": individual_party_files,
+                        "preview_data": preview_results, # SAVE PREVIEWS TO SESSION STATE
+                        "bump_setting": is_bump_order_set # SAVE SETTING
                     }
                     
                     st.success("Matching Complete!")
@@ -1364,3 +1372,30 @@ else:
                             key=f"dl_btn_{fname}",
                             use_container_width=True  # This makes the button stretch to fill the column
                         )
+    
+    # --- NEW TAB 8: LIVE MATCH PREVIEW ---
+    with tab8:
+        st.header("Live Match Preview")
+        
+        if st.session_state.match_results and "preview_data" in st.session_state.match_results:
+            data_map = st.session_state.match_results["preview_data"]
+            setting = st.session_state.match_results["bump_setting"]
+            
+            st.info(f"Showing results for Bump Order Set: **{'Yes' if setting == 'y' else 'No'}**")
+
+            for party_num, df in data_map.items():
+                with st.expander(f"Party {party_num}", expanded=True):
+                    if not df.empty:
+                        if setting == 'y':
+                            st.subheader("First Round Network Matches")
+                            # Filter for Round 1
+                            display_df = df[df['Round'] == 1].drop(columns=['Team ID', 'Round', 'Team Members'], errors='ignore')
+                        else:
+                            st.subheader("Full Rotation Flow")
+                            display_df = df.drop(columns=['Team ID', 'Team Members'], errors='ignore')
+
+                        st.dataframe(display_df, use_container_width=True)
+                    else:
+                        st.warning("No matches found for this party.")
+        else:
+            st.info("⚠️ Please run the matching algorithm in the **'Run Matching'** tab first to see results here.")
