@@ -321,9 +321,10 @@ if not st.session_state.authenticated:
 else:
     st.success("Logged in as Admin")
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "Settings & Roster", "Member Information", "PNM Information and Rankings", 
-        "View Bump Teams", "View Excuses", "View Prior Connections", "Run Matching"
+        "View Bump Teams", "View Excuses", "View Prior Connections", "Run Matching",
+        "View Generated Matches"
     ])
 
     # --- TAB 1: SETTINGS ---
@@ -645,8 +646,6 @@ else:
             st.dataframe(display_conn, use_container_width=True)
         else: st.info("No prior connections found.")
             
-    # --- TAB 7: RUN MATCHING ---
-
     # --- TAB 7: RUN MATCHING ---
     with tab7:
         st.header("Run Matching Algorithm")
@@ -1202,7 +1201,7 @@ else:
                                                     })
                                                     round_pnm_done.add(p['p_id']); round_mem_done.add(m['id'])
                                                     history.add((str(p['p_id']), str(m['id'])))
-                                    return rotation_output
+                                return rotation_output
 
                             internal_flow_results = run_internal_rotation(assignments_map_flow, method='flow')
                             internal_greedy_results = run_internal_rotation(assignments_map_greedy, method='greedy')
@@ -1348,3 +1347,43 @@ else:
                             key=f"dl_btn_{fname}",
                             use_container_width=True  # This makes the button stretch to fill the column
                         )
+    
+    # --- TAB 8: VIEW MATCH RESULTS (NEW) ---
+    with tab8:
+        st.header("View Generated Match Results")
+        
+        if "match_results" not in st.session_state or not st.session_state.match_results:
+            st.info("⚠️ No results found. Please go to the 'Run Matching' tab and execute the algorithm first.")
+        else:
+            files = st.session_state.match_results["individual_files"]
+            if not files:
+                st.warning("Matches were run, but no party files were generated. Check your inputs.")
+            else:
+                # Create a selector for the party file
+                # files is a list of tuples: (Label, Filename, Data)
+                file_options = {f[0]: f[2] for f in files} # Map Label -> Data
+                
+                col_sel1, col_sel2 = st.columns([1, 3])
+                with col_sel1:
+                    selected_party_label = st.selectbox("Select Party to View:", list(file_options.keys()))
+                
+                if selected_party_label:
+                    # Load the bytes into an ExcelFile object
+                    excel_data = BytesIO(file_options[selected_party_label])
+                    try:
+                        xls = pd.ExcelFile(excel_data)
+                        sheet_names = xls.sheet_names
+                        
+                        with col_sel2:
+                            selected_sheet = st.selectbox("Select View (Sheet):", sheet_names)
+                        
+                        st.divider()
+                        
+                        # Read and Display
+                        df_view = pd.read_excel(xls, sheet_name=selected_sheet)
+                        
+                        st.markdown(f"### {selected_party_label} - {selected_sheet}")
+                        st.dataframe(df_view, use_container_width=True)
+                        
+                    except Exception as e:
+                        st.error(f"Error reading Excel file: {e}")
