@@ -206,6 +206,27 @@ def get_available_match_sheets():
         st.error(f"Error fetching match sheets: {e}")
         return []
 
+# --- NEW HELPER: GET ALLOWED PARTIES FROM SETTINGS ---
+@st.cache_data(ttl=60)
+def get_allowed_parties():
+    """
+    Fetches the list of visible party IDs from the 'Settings' sheet.
+    Reads Column E (index 5) where the admin dashboard saves the multiselect data.
+    """
+    try:
+        sheet = get_sheet("Settings")
+        if not sheet: return []
+        
+        # Admin saves party numbers in Column E (5)
+        # Example format: "Parties Show to Members", "1", "2", ...
+        vals = sheet.col_values(5)
+        
+        # Filter: keep only digits (excludes header text or empty rows)
+        allowed = [str(v).strip() for v in vals if str(v).strip().isdigit()]
+        return allowed
+    except Exception:
+        return []
+
 # --- MAIN APP LAYOUT ---
 st.title("Sorority Recruitment Portal")
 
@@ -686,18 +707,31 @@ with tab6:
     # 1. Fetch available sheets
     raw_sheet_names = get_available_match_sheets()
     
-    # 2. Create a clean mapping (Display Name -> Actual Sheet Name)
+    # 2. Filter based on Admin Settings
+    allowed_ids = get_allowed_parties()
+    
+    visible_sheets = []
+    # If no parties are published (allowed_ids is empty), we show nothing.
+    if allowed_ids:
+        for name in raw_sheet_names:
+            parts = name.strip().split()
+            # Logic: Expecting "Party X ..." where X is a digit
+            if len(parts) >= 2 and parts[0] == "Party" and parts[1].isdigit():
+                if parts[1] in allowed_ids:
+                    visible_sheets.append(name)
+    
+    # 3. Create a clean mapping (Display Name -> Actual Sheet Name)
     sheet_map = {
         name.replace(" Matches", "")
             .replace(" Flow", "")
             .replace("Round 1", "")
             .replace("Rotation", "")
             .strip(): name 
-        for name in raw_sheet_names
+        for name in visible_sheets
     }
     
     if sheet_map:
-        # 3. Select Box using the Clean Names
+        # 4. Select Box using the Clean Names
         selected_display_name = st.selectbox(
             "Select Schedule:", 
             sorted(sheet_map.keys(), key=lambda x: int(x.split()[-1]) if x.split()[-1].isdigit() else x)
@@ -710,7 +744,7 @@ with tab6:
             st.cache_data.clear()
             st.rerun()
         
-        # 4. Load Data using the ACTUAL sheet name
+        # 5. Load Data using the ACTUAL sheet name
         sheet_matches = get_sheet(actual_sheet_name)
         if sheet_matches:
             try:
@@ -719,13 +753,12 @@ with tab6:
                     df_matches = pd.DataFrame(data[1:], columns=data[0])
                     
                     # --- NEW: Hide Matching Cost Column ---
-                    # Drops any column that contains "cost" or "weight" (case-insensitive)
                     cols_to_drop = [c for c in df_matches.columns if 'cost' in c.lower() or 'weight' in c.lower()]
                     if cols_to_drop:
                         df_matches = df_matches.drop(columns=cols_to_drop)
                     # --------------------------------------
 
-                    # 5. Search/Filter
+                    # 6. Search/Filter
                     st.write("---")
                     col_s1, col_s2 = st.columns([2,1])
                     with col_s1:
