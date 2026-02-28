@@ -1123,7 +1123,11 @@ else:
                     }
                     if setting == 'y':
                         st.subheader("First Round Network Matches")
-                        edited_df = st.data_editor(df, use_container_width=True, hide_index=True, column_config=column_config)
+                        # --- MODIFICATION START ---
+                        # Drop columns for display when bump order is set
+                        df_display = df.drop(columns=['Team ID', 'Round'], errors='ignore')
+                        edited_df = st.data_editor(df_display, use_container_width=True, hide_index=True, column_config=column_config)
+                        # --- MODIFICATION END ---
                     else:
                         st.subheader("Full Rotation Flow")
                         edited_df = st.data_editor(df, use_container_width=True, hide_index=True, column_config=column_config)
