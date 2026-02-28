@@ -25,6 +25,23 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive"
 ]
 
+# --- AUTHENTICATION & CONNECTION ---
+@st.cache_resource
+def get_gspread_client():
+    try:
+        scope = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"
+        ]
+        # Ensure your secrets are configured in .streamlit/secrets.toml
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+        client = gspread.authorize(creds)
+        return client
+    except Exception as e:
+        st.error(f"❌ API Connection Error: {e}")
+        return None
+
 # --- CACHED RESOURCES ---
 @st.cache_resource
 def load_model():
