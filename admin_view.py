@@ -1288,7 +1288,7 @@ else:
                         target_sheet_title = f"Party {selected_party} {selected_type}"
                         
                         # 4. Load Data
-                        st.markdown(f"### {selected_party}")
+                        st.markdown(f"### Party {selected_party}")
                         
                         try:
                             worksheet = sh.worksheet(target_sheet_title)
@@ -1308,7 +1308,7 @@ else:
                                 )
 
                                 # 6. Save Button
-                                if st.button("💾 Save Changes to Google Drive"):
+                                if st.button("Save Changes to Google Drive"):
                                     with st.spinner(f"Saving to '{target_sheet_title}'..."):
                                         # Ensure your save_party_to_gsheet function is available in the script
                                         # If not, you can use standard gspread commands here.
