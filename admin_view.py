@@ -641,7 +641,7 @@ else:
         col_p1, col_p2 = st.columns([3, 1])
         with col_p1:
             selected_parties_to_show = st.multiselect(
-                "Select Parties to Publish to Members (Saved to Settings):", 
+                "Select Parties to Publish to Members:", 
                 options=party_opts,
                 format_func=lambda x: f"Party {x}", 
                 default=[] 
