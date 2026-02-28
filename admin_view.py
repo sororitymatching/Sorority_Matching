@@ -282,6 +282,46 @@ def auto_adjust_columns(writer, sheet_name, df):
         max_len = max(df[col].astype(str).map(len).max(), len(str(col))) + 2
         worksheet.set_column(idx, idx, max_len)
 
+# --- REGENERATION HELPER FOR TAB 8 ---
+def regenerate_zip_from_changes():
+    """
+    Takes the edited dataframes from st.session_state.match_results["preview_data"],
+    generates Excel files, zips them, and updates the session state "zip_data" and "individual_files".
+    """
+    if not st.session_state.match_results or "preview_data" not in st.session_state.match_results:
+        return
+
+    data_map = st.session_state.match_results["preview_data"]
+    zip_buffer = BytesIO()
+    individual_party_files = []
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for party, df_rot_flow in data_map.items():
+            output = BytesIO()
+            # We are only saving the modified "Rotation/Round 1 Flow" sheet here for simplicity,
+            # as recreating the other sheets (Greedy, Stats) from just the preview DF is complex without
+            # re-running the whole algo.
+            # Ideally, we update the primary sheet that the user sees.
+            
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                # Save the edited flow
+                df_rot_flow.to_excel(writer, sheet_name="Final_Matches_Edited", index=False)
+                auto_adjust_columns(writer, "Final_Matches_Edited", df_rot_flow)
+            
+            file_content = output.getvalue()
+            file_name_x = f"Party_{party}_Match_Analysis_Edited.xlsx"
+            
+            # Add to zip
+            zf.writestr(file_name_x, file_content)
+            
+            # Add to individual list
+            individual_party_files.append((f"Party {party} (Edited)", file_name_x, file_content))
+
+    # Update session state
+    st.session_state.match_results["zip_data"] = zip_buffer.getvalue()
+    st.session_state.match_results["individual_files"] = individual_party_files
+    st.toast("Files updated successfully!", icon="✅")
+
 # --- MATCHING ALGORITHM HELPERS ---
 def get_coords_offline(hometown_str, city_coords_map, all_city_keys):
     if not isinstance(hometown_str, str): return None, None
@@ -324,7 +364,7 @@ else:
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "Settings & Roster", "Member Information", "PNM Information and Rankings", 
         "View Bump Teams", "View Excuses", "View Prior Connections", "Run Matching",
-        "Live Match Preview" 
+        "Live Match Preview & Edit" 
     ])
 
     # --- TAB 1: SETTINGS ---
@@ -1374,7 +1414,7 @@ else:
     
     # --- NEW TAB 8: LIVE MATCH PREVIEW ---
     with tab8:
-        st.header("Live Match Preview")
+        st.header("Live Match Preview & Edit")
         
         if st.session_state.match_results and "preview_data" in st.session_state.match_results:
             data_map = st.session_state.match_results["preview_data"]
@@ -1382,33 +1422,53 @@ else:
             
             st.info(f"Showing results for Bump Order Set: **{'Yes' if setting == 'y' else 'No'}**")
 
-            # --- CHANGE START ---
             # Get available parties
             available_parties = sorted(data_map.keys())
             
             if available_parties:
                 # Create Dropdown
-                selected_party = st.selectbox("Select Party to View:", available_parties, format_func=lambda x: f"Party {x}")
+                selected_party = st.selectbox("Select Party to View/Edit:", available_parties, format_func=lambda x: f"Party {x}")
                 
                 # Get specific DF
                 df = data_map[selected_party]
                 
                 st.markdown(f"### Party {selected_party} Results")
+                st.caption("You can edit cells below (e.g. change a matched member name). Press 'Save Changes & Regenerate Files' to update the downloadable Excel sheets.")
 
                 if not df.empty:
+                    # Configure columns to hide internal IDs but keep them for data integrity
+                    column_config = {
+                        "Team ID": st.column_config.NumberColumn(disabled=True), 
+                        "Team Members": st.column_config.TextColumn(disabled=True),
+                        "Round": st.column_config.NumberColumn(disabled=True),
+                    }
+                    
+                    # If setting is 'y', hide Round/Team ID from view but keep in editor data
                     if setting == 'y':
                         st.subheader("First Round Network Matches")
-                        # Filter for Round 1
-                        display_df = df[df['Round'] == 1].drop(columns=['Team ID', 'Round', 'Team Members'], errors='ignore')
+                        # We use the full DF in the editor, but configure columns to hide
+                        # Note: st.data_editor supports hiding columns via config in recent versions, 
+                        # or we rely on user ignoring them. 
+                        # To purely hide them, we'd have to drop them, but then we lose them on save.
+                        # Compromise: Disable editing for them.
+                        edited_df = st.data_editor(df, use_container_width=True, hide_index=True, column_config=column_config)
                     else:
                         st.subheader("Full Rotation Flow")
-                        display_df = df.drop(columns=['Team ID', 'Team Members'], errors='ignore')
+                        edited_df = st.data_editor(df, use_container_width=True, hide_index=True, column_config=column_config)
 
-                    st.dataframe(display_df, use_container_width=True)
+                    # SAVE BUTTON
+                    if st.button("Save Changes & Regenerate Files"):
+                        # 1. Update the session state with the edited dataframe
+                        st.session_state.match_results["preview_data"][selected_party] = edited_df
+                        
+                        # 2. Regenerate the zip files
+                        with st.spinner("Regenerating Excel files..."):
+                            regenerate_zip_from_changes()
+                            st.rerun()
+
                 else:
                     st.warning("No matches found for this party.")
             else:
                 st.warning("No party data available.")
-            # --- CHANGE END ---
         else:
             st.info("⚠️ Please run the matching algorithm in the **'Run Matching'** tab first to see results here.")
