@@ -891,7 +891,7 @@ else:
                                 
                                 # --- MODIFIED: Detailed Excused Teams Reporting ---
                                 if broken_teams_list:
-                                    warning_msg += f"- **Excused Teams:** {len(broken_teams_list)} team(s) removed.\n"
+                                    warning_msg += f"- **Excused Teams:** {len(broken_teams_list)} team(s) removed.\n\n"
                                     for item in broken_teams_list:
                                         all_mems = ", ".join(item['members'])
                                         missing_mems = ", ".join(item['missing'])
