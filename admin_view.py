@@ -640,7 +640,7 @@ else:
         selected_parties_to_show = st.multiselect(
             "Select Parties to Publish to Members (Saved to Settings):", 
             options=party_opts,
-            default=party_opts 
+            default=[] 
         )
         # -------------------------------------------
 
