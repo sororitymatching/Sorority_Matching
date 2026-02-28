@@ -691,6 +691,7 @@ with tab6:
         name.replace(" Matches", "")
             .replace(" Flow", "")
             .replace("Round 1", "")
+            .replace("Rotation", "")
             .strip(): name 
         for name in raw_sheet_names
     }
