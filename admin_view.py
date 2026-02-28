@@ -370,7 +370,7 @@ else:
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "Settings & Roster", "Member Information", "PNM Information and Rankings", 
         "View Bump Teams", "View Excuses", "View Prior Connections", "Run Matching",
-        "Live Match Preview & Edit" 
+        "Preview Matches and Edit" 
     ])
 
     # --- TAB 1: SETTINGS ---
@@ -1138,7 +1138,7 @@ else:
     
     # --- TAB 8: LIVE MATCH PREVIEW & EDIT ---
     with tab8:
-        st.header("Live Match Preview & Edit")
+        st.header("Preview Party Matches and Edit")
         if st.session_state.match_results and "preview_data" in st.session_state.match_results:
             data_map = st.session_state.match_results["preview_data"]
             setting = st.session_state.match_results["bump_setting"]
@@ -1167,14 +1167,14 @@ else:
                         
                         # Drop internal tracking columns to match the clean sheet output
                         df_to_edit = df_to_edit.drop(columns=['Team ID', 'Round', 'Team Members'], errors='ignore')
-                        st.subheader("First Round Network Matches")
+                        st.subheader("First Round Matches")
                     else:
                         # Logic matches "Rotation Flow" export
                         sheet_suffix = "Rotation Flow"
                         df_to_edit = raw_df.copy()
                         # Drop internal tracking columns
                         df_to_edit = df_to_edit.drop(columns=['Team ID', 'Team Members'], errors='ignore')
-                        st.subheader("Full Rotation Flow")
+                        st.subheader("All Rounds Matches")
 
                     # Render Data Editor (No column_config means ALL columns are editable)
                     edited_df = st.data_editor(df_to_edit, use_container_width=True, hide_index=True)
