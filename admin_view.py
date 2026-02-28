@@ -1150,7 +1150,7 @@ else:
                                                     reason = ", ".join(shared) if shared else "Rotation"
                                                     if is_repeat: reason += " (Repeat)"
                                                     sub_G.add_edge(f"p_{p['p_id']}", f"m_{m['id']}", capacity=1, weight=final_cost, reason=reason)
-                                            
+                                                    
                                             try:
                                                 sub_flow = nx.min_cost_flow(sub_G)
                                                 for p in assigned_pnms:
@@ -1202,7 +1202,7 @@ else:
                                                     })
                                                     round_pnm_done.add(p['p_id']); round_mem_done.add(m['id'])
                                                     history.add((str(p['p_id']), str(m['id'])))
-                                    return rotation_output
+                                return rotation_output
 
                             internal_flow_results = run_internal_rotation(assignments_map_flow, method='flow')
                             internal_greedy_results = run_internal_rotation(assignments_map_greedy, method='greedy')
@@ -1258,38 +1258,54 @@ else:
                                 summary_df = pd.DataFrame(summary_data)
 
                                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                                    summary_df.to_excel(writer, sheet_name="Summary_Comparison", index=False); auto_adjust_columns(writer, "Summary_Comparison", summary_df)
-                                    df_glob_flow.to_excel(writer, sheet_name="Global_Matches_Flow", index=False); auto_adjust_columns(writer, "Global_Matches_Flow", df_glob_flow)
-                                    df_glob_greedy.to_excel(writer, sheet_name="Global_Matches_Greedy", index=False); auto_adjust_columns(writer, "Global_Matches_Greedy", df_glob_greedy)
+                                    # 1. Summary (Always)
+                                    summary_df.to_excel(writer, sheet_name="Summary_Comparison", index=False)
+                                    auto_adjust_columns(writer, "Summary_Comparison", summary_df)
                                     
+                                    # 2. Global Network (Always)
+                                    df_glob_flow.to_excel(writer, sheet_name="Global_Matches_Flow", index=False)
+                                    auto_adjust_columns(writer, "Global_Matches_Flow", df_glob_flow)
+                                    
+                                    # 3. Global Greedy (Always)
+                                    df_glob_greedy.to_excel(writer, sheet_name="Global_Matches_Greedy", index=False)
+                                    auto_adjust_columns(writer, "Global_Matches_Greedy", df_glob_greedy)
+                                    
+                                    # 4. Rotation/Round 1 Flow
                                     if not df_rot_flow.empty:
                                         if is_bump_order_set == "n":
-                                            # MODIFIED: Drop 'Team ID' and 'Team Members' for Rotation Flow export
+                                            # Rotation Flow
                                             rot_flow_out = df_rot_flow.drop(columns=['Team ID', 'Team Members'], errors='ignore')
                                             rot_flow_out.to_excel(writer, sheet_name="Rotation_Flow", index=False)
                                             auto_adjust_columns(writer, "Rotation_Flow", rot_flow_out)
                                             
-                                        if not df_bump_flow.empty: df_bump_flow.to_excel(writer, sheet_name="Bump_Logistics_Flow", index=False); auto_adjust_columns(writer, "Bump_Logistics_Flow", df_bump_flow)
-                                    else:
-                                        # MODIFIED: Drop 'Team ID', 'Round', and 'Team Members' for Round 1 Matches
-                                        r1 = df_rot_flow[df_rot_flow['Round'] == 1].drop(columns=['Team ID', 'Round', 'Team Members'], errors='ignore')
-                                        r1.to_excel(writer, sheet_name="Round_1_Matches_Flow", index=False)
-                                        auto_adjust_columns(writer, "Round_1_Matches_Flow", r1)
+                                            # Bump Logistics Flow
+                                            if not df_bump_flow.empty:
+                                                df_bump_flow.to_excel(writer, sheet_name="Bump_Logistics_Flow", index=False)
+                                                auto_adjust_columns(writer, "Bump_Logistics_Flow", df_bump_flow)
+                                        else:
+                                            # Round 1 Network Matches (Force Output)
+                                            r1_flow = df_rot_flow[df_rot_flow['Round'] == 1].drop(columns=['Team ID', 'Round', 'Team Members'], errors='ignore')
+                                            r1_flow.to_excel(writer, sheet_name="Round_1_Matches_Flow", index=False)
+                                            auto_adjust_columns(writer, "Round_1_Matches_Flow", r1_flow)
                                     
+                                    # 5. Rotation/Round 1 Greedy
                                     if not df_rot_greedy.empty:
                                         if is_bump_order_set == "n":
-                                            # MODIFIED: Drop 'Team ID' and 'Team Members' for Rotation Greedy export
+                                            # Rotation Greedy
                                             rot_greedy_out = df_rot_greedy.drop(columns=['Team ID', 'Team Members'], errors='ignore')
                                             rot_greedy_out.to_excel(writer, sheet_name="Rotation_Greedy", index=False)
                                             auto_adjust_columns(writer, "Rotation_Greedy", rot_greedy_out)
                                             
-                                        if not df_bump_greedy.empty: df_bump_greedy.to_excel(writer, sheet_name="Bump_Logistics_Greedy", index=False); auto_adjust_columns(writer, "Bump_Logistics_Greedy", df_bump_greedy)
-                                    else:
-                                        # MODIFIED: Drop 'Team ID', 'Round', and 'Team Members' for Round 1 Matches
-                                        r1 = df_rot_greedy[df_rot_greedy['Round'] == 1].drop(columns=['Team ID', 'Round', 'Team Members'], errors='ignore')
-                                        r1.to_excel(writer, sheet_name="Round_1_Matches_Greedy", index=False)
-                                        auto_adjust_columns(writer, "Round_1_Matches_Greedy", r1)
-                                
+                                            # Bump Logistics Greedy
+                                            if not df_bump_greedy.empty:
+                                                df_bump_greedy.to_excel(writer, sheet_name="Bump_Logistics_Greedy", index=False)
+                                                auto_adjust_columns(writer, "Bump_Logistics_Greedy", df_bump_greedy)
+                                        else:
+                                            # Round 1 Greedy Matches (Force Output)
+                                            r1_greedy = df_rot_greedy[df_rot_greedy['Round'] == 1].drop(columns=['Team ID', 'Round', 'Team Members'], errors='ignore')
+                                            r1_greedy.to_excel(writer, sheet_name="Round_1_Matches_Greedy", index=False)
+                                            auto_adjust_columns(writer, "Round_1_Matches_Greedy", r1_greedy)
+                                    
                                 # Save the output content to variables for later
                                 file_content = output.getvalue()
                                 file_name_x = f"Party_{party}_Match_Analysis.xlsx"
