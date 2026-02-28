@@ -578,7 +578,7 @@ with tab4:
                             rank_reason_default = r_vals[6]
 
             with st.form(key=f"rank_form"):
-                score = st.number_input("Score (0 if undecided):", min_value=0, step=1, value=rank_default)
+                score = st.number_input("Score:", min_value=0, step=1, value=rank_default)
                 reason = st.text_area("Reason for Ranking:", value=rank_reason_default, placeholder="Explain your score...")
                 submit_rank = st.form_submit_button("Submit Ranking")
 
