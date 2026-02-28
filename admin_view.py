@@ -150,6 +150,27 @@ def update_roster(names_list):
         return True
     except: return False
 
+def update_visible_parties(parties_list):
+    """
+    Updates the list of parties that are visible/published to members in the Settings sheet.
+    Uses Column E in the Settings tab.
+    """
+    try:
+        gc = get_gc()
+        ws = gc.open(SHEET_NAME).worksheet("Settings")
+        # Use robust wrapper to clear old settings in Col E
+        robust_api_write(ws.batch_clear, ["E2:E100"])
+        
+        parties_list.sort()
+        # Format as list of lists for GSpread: [[1], [2], ...]
+        formatted = [[str(p)] for p in parties_list]
+        if formatted: 
+            robust_api_write(ws.update, range_name='E2', values=formatted)
+        return True
+    except Exception as e:
+        print(f"Error updating visible parties: {e}")
+        return False
+
 def update_team_ranking(team_id, new_ranking):
     try:
         gc = get_gc()
@@ -613,6 +634,16 @@ else:
         st.subheader("Matching Algorithm Settings")
         num_parties = get_max_party_count() 
         st.info(f"**Total Parties:** {num_parties} (Detected from 'Party Information' sheet)")
+        
+        # --- NEW: Party Selection for Visibility ---
+        party_opts = list(range(1, num_parties + 1))
+        selected_parties_to_show = st.multiselect(
+            "Select Parties to Publish to Members (Saved to Settings):", 
+            options=party_opts,
+            default=party_opts 
+        )
+        # -------------------------------------------
+
         matches_per_team = st.number_input("Matches per Bump Team (Capacity)", min_value=1, value=2)
         num_rounds = st.number_input("Rounds per Party", min_value=1, value=4)
         bump_order_set = st.radio("Is Bump Order Set?", ("Yes", "No"), horizontal=True)
@@ -635,6 +666,11 @@ else:
             if not party_assignment_file:
                 st.error("❌ Please upload the PNM Party Assignments CSV to proceed.")
             else:
+                # --- NEW: Save Visibility Settings ---
+                with st.spinner("Saving Party Visibility Settings..."):
+                    update_visible_parties(selected_parties_to_show)
+                # -------------------------------------
+
                 # --- MODIFIED: Added logic to delete previous matching sheets ---
                 with st.spinner("Clearing previous matching results..."):
                     delete_old_matching_sheets()
