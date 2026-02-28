@@ -634,21 +634,24 @@ else:
         st.subheader("Matching Algorithm Settings")
         num_parties = get_max_party_count() 
         st.info(f"**Total Parties:** {num_parties} (Detected from 'Party Information' sheet)")
-        
+
         # --- NEW: Party Selection for Visibility ---
         party_opts = list(range(1, num_parties + 1))
         
         col_p1, col_p2 = st.columns([3, 1])
         with col_p1:
             selected_parties_to_show = st.multiselect(
-                "Select Parties to Publish to Members:", 
+                "Select Parties to Publish to Members (Saved to Settings):", 
                 options=party_opts,
                 format_func=lambda x: f"Party {x}", 
                 default=[] 
             )
+            # Added Note based on your request
+            st.caption("ℹ️ **Note:** Updating this list and clicking 'Save' allows you to change which parties members can see immediately, without needing to re-run the entire matching algorithm.")
+
         with col_p2:
             st.markdown("<br>", unsafe_allow_html=True) # Spacer
-            if st.button("Save Published Parties"):
+            if st.button("💾 Save Published Parties"):
                 with st.spinner("Saving settings..."):
                     if update_visible_parties(selected_parties_to_show):
                         st.success("✅ Saved!")
