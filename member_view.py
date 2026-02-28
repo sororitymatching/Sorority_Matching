@@ -687,11 +687,18 @@ with tab6:
     raw_sheet_names = get_available_match_sheets()
     
     # 2. Create a clean mapping (Display Name -> Actual Sheet Name)
-    # This strips " Matches" or " Flow" from the name for the dropdown
-    sheet_map = {name.replace(" Matches", "").replace(" Flow", ""): name for name in raw_sheet_names}
+    # This strips "Matches", "Flow", and "Round 1" from the name for the dropdown
+    sheet_map = {
+        name.replace(" Matches", "")
+            .replace(" Flow", "")
+            .replace("Round 1", "")
+            .strip(): name 
+        for name in raw_sheet_names
+    }
     
     if sheet_map:
         # 3. Select Box using the Clean Names
+        # Sorting logic attempts to sort by the number at the end (e.g., "Party 1" -> 1)
         selected_display_name = st.selectbox(
             "Select Schedule:", 
             sorted(sheet_map.keys(), key=lambda x: int(x.split()[-1]) if x.split()[-1].isdigit() else x)
