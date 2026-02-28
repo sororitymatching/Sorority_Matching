@@ -7,7 +7,7 @@ import re
 import difflib
 import io
 import zipfile
-import time 
+import time  # Added for sleep/backoff
 from io import BytesIO
 from math import radians
 from sentence_transformers import SentenceTransformer
@@ -323,8 +323,7 @@ else:
 
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "Settings & Roster", "Member Information", "PNM Information and Rankings", 
-        "View Bump Teams", "View Excuses", "View Prior Connections", "Run Matching"
-    ])
+        "View Bump Teams", "View Excuses", "View Prior Connections", "Run Matching"])
 
     # --- TAB 1: SETTINGS ---
     with tab1:
@@ -729,8 +728,7 @@ else:
                         pnm_intial_interest = pnm_intial_interest.merge(
                             assignments_df[['PNM ID', 'Party']], 
                             on='PNM ID', 
-                            how='inner'
-                        )
+                            how='inner')
                         
                         if pnm_intial_interest.empty:
                             st.error("No matches found between the uploaded PNM Assignments and the PNM Information database. Check your PNM IDs.")
@@ -752,8 +750,7 @@ else:
                         'Enter your high school involvement (sports, clubs etc.), separate each activity by a comma:': 'High School Involvement',
                         'Enter your college involvement (sports, clubs etc.), separate each activity by a comma:': 'College Involvement',
                         'Enter your hobbies and interests, separate each activity by a comma:': 'Hobbies',
-                        'Pick your year in school:': 'Year'
-                    }
+                        'Pick your year in school:': 'Year'}
                     pnm_clean = pnm_intial_interest.rename(columns=pnm_col_map)
                     df_mem = member_interest.copy()
                     
@@ -915,8 +912,7 @@ else:
                                     'attrs': p_attrs, 
                                     'rank': p_rank_val, 
                                     'bonus': pnm_bonus,
-                                    'node_id': f"p_{i}"
-                                })
+                                    'node_id': f"p_{i}"})
 
                             party_excused_names = set(party_excuses[party_excuses["Choose the party/parties you are unable to attend:"] == party]["Member Name"])
 
@@ -956,9 +952,7 @@ else:
                             
                             # NEW VALIDATION
                             if len(pnm_list) > total_capacity:
-                                warning_msg = (f"**Party {party} Warning**: Not enough capacity! "
-                                               f"{len(pnm_list)} PNMs vs {total_capacity} Slots ({len(team_list)} Teams × {matches_per_team}). "
-                                               f"Unmatched PNMs will appear in the results.\n\n")
+                                warning_msg = (f"**Party {party} Warning**: Not enough capacity!\n {len(pnm_list)} PNMs vs {total_capacity} Slots ({len(team_list)} Teams × {matches_per_team}). \n Unmatched PNMs will appear in the results.\n\n")
                                 
                                 # Check for excused teams
                                 if broken_teams_list:
@@ -1016,8 +1010,7 @@ else:
                                         'p_node': p_data['node_id'], 't_node': t_data['node_id'],
                                         'cost': final_cost, 'pnm_rank': p_data['rank'],
                                         'team_members': t_data['joined_names'],
-                                        'reasons': " ".join(reasons_list) if reasons_list else "No specific match"
-                                    })
+                                        'reasons': " ".join(reasons_list) if reasons_list else "No specific match"})
 
                             potential_pairs.sort(key=lambda x: (x['cost'], -x['pnm_rank']))
                             matchable_pnm_ids = {p['p_id'] for p in potential_pairs}
@@ -1168,8 +1161,7 @@ else:
                                                                 rotation_output.append({
                                                                     'Round': round_num, 'Team ID': t_idx, 'Team Members': team_data['joined_names'],
                                                                     'PNM ID': p['p_id'], 'PNM Name': p['p_name'], 'Matched Member': m_name,
-                                                                    'Match Cost': round(calc_cost, 4), 'Reason': f"Common: {edge_d.get('reason')}"
-                                                                })
+                                                                    'Match Cost': round(calc_cost, 4), 'Reason': f"Common: {edge_d.get('reason')}"})
                                                                 # Add to history as strings
                                                                 history.add((str(p['p_id']), str(raw_id)))
                                             except nx.NetworkXUnfeasible:
@@ -1198,8 +1190,7 @@ else:
                                                     rotation_output.append({
                                                         'Round': round_num, 'Team ID': t_idx, 'Team Members': team_data['joined_names'],
                                                         'PNM ID': p['p_id'], 'PNM Name': p['p_name'], 'Matched Member': m['name'],
-                                                        'Match Cost': round(1.0/(1.0+real_score), 4), 'Reason': f"Common: {rs}" if real_score > 0 else "Greedy Fill"
-                                                    })
+                                                        'Match Cost': round(1.0/(1.0+real_score), 4), 'Reason': f"Common: {rs}" if real_score > 0 else "Greedy Fill"})
                                                     round_pnm_done.add(p['p_id']); round_mem_done.add(m['id'])
                                                     history.add((str(p['p_id']), str(m['id'])))
                                     return rotation_output
@@ -1217,8 +1208,7 @@ else:
                                 instructions = df[df['Person_To_Bump'].notna()].copy()
                                 instructions['At End Of Round'] = instructions['Round'] - 1
                                 output = instructions[['Matched Member', 'At End Of Round', 'Person_To_Bump', 'PNM Name']].rename(columns={
-                                    'Matched Member': 'Member (You)', 'Person_To_Bump': 'Go Bump This Person', 'PNM Name': 'Who is with PNM'
-                                })
+                                    'Matched Member': 'Member (You)', 'Person_To_Bump': 'Go Bump This Person', 'PNM Name': 'Who is with PNM'})
                                 return output.sort_values(by=['Member (You)', 'At End Of Round']).to_dict('records')
 
                             bump_instruct_flow = generate_bump_instructions(internal_flow_results)
@@ -1318,8 +1308,7 @@ else:
                 label="Download All Matches (ZIP)",
                 data=st.session_state.match_results["zip_data"],
                 file_name="recruitment_matches.zip",
-                mime="application/zip"
-            )
+                mime="application/zip")
             
             # 2. Individual Downloads
             st.write("### Individual Party Sheets")
