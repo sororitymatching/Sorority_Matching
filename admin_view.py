@@ -627,7 +627,7 @@ else:
             else: display_conn = df_conn
             st.dataframe(display_conn, use_container_width=True)
         else: st.info("No prior connections found.")
-            
+
     # --- TAB 7: RUN MATCHING ---
     with tab7:
         st.header("Run Matching Algorithm")
@@ -635,7 +635,7 @@ else:
         num_parties = get_max_party_count() 
         st.info(f"**Total Parties:** {num_parties} (Detected from 'Party Information' sheet)")
 
-        # --- NEW: Party Selection for Visibility ---
+        # --- Party Selection for Visibility ---
         party_opts = list(range(1, num_parties + 1))
         
         col_p1, col_p2 = st.columns([3, 1])
@@ -646,7 +646,6 @@ else:
                 format_func=lambda x: f"Party {x}", 
                 default=[] 
             )
-            # Added Note based on your request
             st.caption("ℹ️ **Note:** Updating this list and clicking 'Save' allows you to change which parties members can see immediately, without needing to re-run the entire matching algorithm.")
 
         with col_p2:
@@ -657,7 +656,6 @@ else:
                         st.success("✅ Saved!")
                     else:
                         st.error("Error saving.")
-        # -------------------------------------------
 
         matches_per_team = st.number_input("Matches per Bump Team (Capacity)", min_value=1, value=2)
         num_rounds = st.number_input("Rounds per Party", min_value=1, value=4)
@@ -681,15 +679,13 @@ else:
             if not party_assignment_file:
                 st.error("❌ Please upload the PNM Party Assignments CSV to proceed.")
             else:
-                # --- NEW: Save Visibility Settings ---
+                # --- Save Visibility Settings ---
                 with st.spinner("Saving Party Visibility Settings..."):
                     update_visible_parties(selected_parties_to_show)
-                # -------------------------------------
 
-                # --- MODIFIED: Added logic to delete previous matching sheets ---
+                # --- Delete previous matching sheets ---
                 with st.spinner("Clearing previous matching results..."):
                     delete_old_matching_sheets()
-                # -------------------------------------------------------------
                 
                 with st.spinner("Processing matches..."):
                     bump_teams, party_excuses, pnm_intial_interest, member_interest, member_pnm_no_match = load_google_sheet_data(SHEET_NAME)
@@ -867,7 +863,16 @@ else:
                                 else: partners = [p.strip() for p in re.split(r'[,;]\s*', partners_str) if p.strip()]
                                 current_members = [submitter] + partners
                                 missing_members = [m for m in current_members if m in party_excused_names]
-                                if missing_members: broken_teams_list.append({'members': current_members, 'missing': missing_members})
+                                
+                                # --- MODIFIED: Capture Team ID for Excused Reporting ---
+                                t_id = str(row.get("Team ID", row.get("ID", "Unknown"))) 
+                                if missing_members:
+                                    broken_teams_list.append({
+                                        'id': t_id,
+                                        'members': current_members, 
+                                        'missing': missing_members
+                                    })
+                                # --------------------------------------------------------
                                 else:
                                     t_rank_val = to_float(row.get("Ranking", t_global_max))
                                     safe_t_rank = max(t_global_min, min(t_rank_val, t_global_max))
@@ -883,9 +888,19 @@ else:
                             total_capacity = len(team_list) * matches_per_team
                             if len(pnm_list) > total_capacity:
                                 warning_msg = (f"**Party {party} Warning**: Not enough capacity! {len(pnm_list)} PNMs vs {total_capacity} Slots.\n\n")
+                                
+                                # --- MODIFIED: Detailed Excused Teams Reporting ---
                                 if broken_teams_list:
-                                    warning_msg += f"- **Excused Teams:** {len(broken_teams_list)} team(s) removed due to excuses.\n"
-                                else: warning_msg += "No teams were removed due to excuses for this party.\n"
+                                    warning_msg += f"- **Excused Teams:** {len(broken_teams_list)} team(s) removed.\n"
+                                    for item in broken_teams_list:
+                                        all_mems = ", ".join(item['members'])
+                                        missing_mems = ", ".join(item['missing'])
+                                        warning_msg += f"  • **Team {item['id']}** (Members: {all_mems}) removed.\n"
+                                        warning_msg += f"    *Reason:* **{missing_mems}** is excused from this party.\n"
+                                else: 
+                                    warning_msg += "No teams were removed due to excuses for this party.\n"
+                                # ----------------------------------------------------
+
                                 warning_msg += "\n"
                                 active_team_members = set()
                                 for t in team_list: active_team_members.update(t['members'])
@@ -1096,22 +1111,17 @@ else:
                                 df_bump_greedy = pd.DataFrame(bump_instruct_greedy)
                                 preview_results[party] = df_rot_flow
 
-                                # --- MODIFIED SECTION: WRITE TO GOOGLE SHEET BASED ON BUMP ORDER ---
                                 if is_bump_order_set == 'y':
-                                    # Filter for Round 1
                                     export_df = df_rot_flow[df_rot_flow['Round'] == 1].copy()
                                     export_df = export_df.drop(columns=['Team ID', 'Round', 'Team Members'], errors='ignore')
                                     sheet_suffix = "Round 1 Matches"
                                 else:
-                                    # Full Rotation Flow
                                     export_df = df_rot_flow.copy()
                                     export_df = export_df.drop(columns=['Team ID', 'Team Members'], errors='ignore')
                                     sheet_suffix = "Rotation Flow"
                                 
-                                # Use the specific title convention requested: Party X [Suffix]
                                 save_party_to_gsheet(party, export_df, specific_title=f"Party {party} {sheet_suffix}")
-                                time.sleep(1.5) # ADDED: Throttle loop to prevent burst limit hits
-                                # -------------------------------------------------------------------
+                                time.sleep(1.5)
 
                                 flow_costs = df_glob_flow['Match Cost'].dropna()
                                 greedy_costs = df_glob_greedy['Match Cost'].dropna()
@@ -1168,8 +1178,8 @@ else:
                     st.session_state.match_results = {
                         "zip_data": zip_buffer.getvalue(),
                         "individual_files": individual_party_files,
-                        "preview_data": preview_results, 
-                        "bump_setting": is_bump_order_set 
+                        "preview_data": preview_results,
+                        "bump_setting": is_bump_order_set
                     }
                     st.success("Matching Complete!")
         
@@ -1186,7 +1196,7 @@ else:
                 for idx, (label, fname, data) in enumerate(row_files):
                     with cols[idx]:
                         st.download_button(label=f"Download {label}", data=data, file_name=fname, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_btn_{fname}", use_container_width=True)
-    
+
     # --- TAB 8: LIVE MATCH PREVIEW & EDIT ---
     with tab8:
         st.header("Preview Party Matches and Edit")
