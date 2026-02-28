@@ -15,6 +15,7 @@ from sentence_transformers import SentenceTransformer
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.metrics.pairwise import haversine_distances
 from gspread.exceptions import APIError, WorksheetNotFound
+from google.oauth2.service_account import Credentials
 
 # --- CONFIGURATION ---
 SHEET_NAME = "OverallMatchingInformation"
