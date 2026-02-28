@@ -634,15 +634,26 @@ else:
         st.subheader("Matching Algorithm Settings")
         num_parties = get_max_party_count() 
         st.info(f"**Total Parties:** {num_parties} (Detected from 'Party Information' sheet)")
-
+        
         # --- NEW: Party Selection for Visibility ---
         party_opts = list(range(1, num_parties + 1))
-        selected_parties_to_show = st.multiselect(
-            "Select Parties to Publish to Members:", 
-            options=party_opts,
-            format_func=lambda x: f"Party {x}",  # <--- Added this line
-            default=[] 
-        )
+        
+        col_p1, col_p2 = st.columns([3, 1])
+        with col_p1:
+            selected_parties_to_show = st.multiselect(
+                "Select Parties to Publish to Members (Saved to Settings):", 
+                options=party_opts,
+                format_func=lambda x: f"Party {x}", 
+                default=[] 
+            )
+        with col_p2:
+            st.markdown("<br>", unsafe_allow_html=True) # Spacer
+            if st.button("💾 Save Published Parties"):
+                with st.spinner("Saving settings..."):
+                    if update_visible_parties(selected_parties_to_show):
+                        st.success("✅ Saved!")
+                    else:
+                        st.error("Error saving.")
         # -------------------------------------------
 
         matches_per_team = st.number_input("Matches per Bump Team (Capacity)", min_value=1, value=2)
