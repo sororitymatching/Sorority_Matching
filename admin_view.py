@@ -321,7 +321,6 @@ if not st.session_state.authenticated:
 else:
     st.success("Logged in as Admin")
 
-    # --- MODIFIED: ADDED "Live Match Preview" TAB ---
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "Settings & Roster", "Member Information", "PNM Information and Rankings", 
         "View Bump Teams", "View Excuses", "View Prior Connections", "Run Matching",
@@ -1383,19 +1382,33 @@ else:
             
             st.info(f"Showing results for Bump Order Set: **{'Yes' if setting == 'y' else 'No'}**")
 
-            for party_num, df in data_map.items():
-                with st.expander(f"Party {party_num}", expanded=True):
-                    if not df.empty:
-                        if setting == 'y':
-                            st.subheader("First Round Network Matches")
-                            # Filter for Round 1
-                            display_df = df[df['Round'] == 1].drop(columns=['Team ID', 'Round', 'Team Members'], errors='ignore')
-                        else:
-                            st.subheader("Full Rotation Flow")
-                            display_df = df.drop(columns=['Team ID', 'Team Members'], errors='ignore')
+            # --- CHANGE START ---
+            # Get available parties
+            available_parties = sorted(data_map.keys())
+            
+            if available_parties:
+                # Create Dropdown
+                selected_party = st.selectbox("Select Party to View:", available_parties, format_func=lambda x: f"Party {x}")
+                
+                # Get specific DF
+                df = data_map[selected_party]
+                
+                st.markdown(f"### Party {selected_party} Results")
 
-                        st.dataframe(display_df, use_container_width=True)
+                if not df.empty:
+                    if setting == 'y':
+                        st.subheader("First Round Network Matches")
+                        # Filter for Round 1
+                        display_df = df[df['Round'] == 1].drop(columns=['Team ID', 'Round', 'Team Members'], errors='ignore')
                     else:
-                        st.warning("No matches found for this party.")
+                        st.subheader("Full Rotation Flow")
+                        display_df = df.drop(columns=['Team ID', 'Team Members'], errors='ignore')
+
+                    st.dataframe(display_df, use_container_width=True)
+                else:
+                    st.warning("No matches found for this party.")
+            else:
+                st.warning("No party data available.")
+            # --- CHANGE END ---
         else:
             st.info("⚠️ Please run the matching algorithm in the **'Run Matching'** tab first to see results here.")
