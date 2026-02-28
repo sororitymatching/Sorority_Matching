@@ -1208,102 +1208,118 @@ else:
                 for idx, (label, fname, data) in enumerate(row_files):
                     with cols[idx]:
                         st.download_button(label=f"Download {label}", data=data, file_name=fname, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_btn_{fname}", use_container_width=True)
-        # --- TAB 8: LIVE MATCH PREVIEW & EDIT ---
+    
+    # --- TAB 8: LIVE MATCH PREVIEW & EDIT ---
     with tab8:
         st.header("Preview Party Matches and Edit")
+        st.caption("This tab scans your Google Sheet for existing match schedules.")
+
+        # 1. Connect to Google Sheets
+        client = get_gspread_client()
         
-        # We still need the match results to know the "bump setting" logic (Round 1 vs Rotation)
-        if st.session_state.match_results:
-            setting = st.session_state.match_results.get("bump_setting", "n")
-            st.info(f"Showing results for Bump Order Set: **{'Yes' if setting == 'y' else 'No'}**")
-            
-            # 1. Determine the suffix we are looking for in the Google Sheet
-            if setting == 'y':
-                sheet_suffix = "Round 1 Matches"
-            else:
-                sheet_suffix = "Rotation Flow"
-            
-            # 2. Connect to Google Sheets and find matching tabs
+        if client:
             try:
-                # Open the workbook
                 sh = client.open("OverallMatchingInformation")
                 all_worksheets = sh.worksheets()
-                
-                # Filter tabs that match the pattern "Party X [Suffix]"
-                found_parties = []
-                for ws in all_worksheets:
-                    title = ws.title
-                    if title.startswith("Party ") and title.endswith(sheet_suffix):
-                        try:
-                            # Extract the ID: "Party 5 Round 1 Matches" -> "5"
-                            # Split by suffix to handle it cleanly
-                            prefix = title.split(f" {sheet_suffix}")[0]
-                            party_num = int(prefix.replace("Party ", ""))
-                            found_parties.append(party_num)
-                        except ValueError:
-                            continue
-                
-                available_parties = sorted(found_parties)
-                
-            except Exception as e:
-                st.error(f"Could not connect to Google Sheets: {e}")
-                available_parties = []
+                all_titles = [ws.title for ws in all_worksheets]
 
-            # 3. Display Selectbox if parties found
-            if available_parties:
-                selected_party = st.selectbox("Select Party to View/Edit:", available_parties, format_func=lambda x: f"Party {x}")
-                
-                # Construct the exact title based on selection
-                target_sheet_title = f"Party {selected_party} {sheet_suffix}"
-                
-                st.markdown(f"### {target_sheet_title}")
-                st.caption("Data loaded directly from Google Sheets. Edits will save back to the Sheet and update the downloadable files.")
+                # 2. Analyze existing sheets to find valid Categories and Parties
+                # We look for titles like "Party 1 Round 1 Matches" or "Party 1 Rotation Flow"
+                valid_suffixes = ["Round 1 Matches", "Rotation Flow"]
+                found_data = {} # Structure: { "Round 1 Matches": [1, 2, 3], "Rotation Flow": [1, 2] }
 
-                # 4. Load the specific sheet data
-                try:
-                    worksheet = sh.worksheet(target_sheet_title)
-                    # get_all_records returns a list of dictionaries
-                    data = worksheet.get_all_records()
-                    
-                    # Convert to DataFrame
-                    # We treat all data as string to prevent type issues during editing, 
-                    # unless you have specific numeric columns you want to enforce.
-                    df_to_edit = pd.DataFrame(data)
-                except Exception as load_error:
-                    st.error(f"Error loading tab '{target_sheet_title}': {load_error}")
-                    df_to_edit = pd.DataFrame()
-
-                if not df_to_edit.empty:
-                    # 5. Render Data Editor
-                    # We load it 'as-is' because the sheet should already be in the correct format 
-                    # (Round 1 or Rotation) from the previous export steps.
-                    edited_df = st.data_editor(df_to_edit, use_container_width=True, hide_index=True)
-
-                    # 6. Save Logic
-                    if st.button("Save to Google Drive & Regenerate Files"):
-                        with st.spinner(f"Updating '{target_sheet_title}' in Google Sheets..."):
-                            
-                            # A. Update the Google Sheet
-                            # We use the existing helper function, passing the exact title to overwrite
-                            save_success = save_party_to_gsheet(selected_party, edited_df, specific_title=target_sheet_title)
-                            
-                            if save_success:
-                                # B. Update Session State (Sync)
-                                # We sync the edited data back to session state so the ZIP generator 
-                                # (which usually pulls from state) uses the latest version.
-                                if "preview_data" in st.session_state.match_results:
-                                    st.session_state.match_results["preview_data"][selected_party] = edited_df
-
-                                # C. Regenerate ZIP
-                                regenerate_zip_from_changes()
+                for title in all_titles:
+                    for suffix in valid_suffixes:
+                        if title.startswith("Party ") and title.endswith(suffix):
+                            try:
+                                # Extract Party ID: "Party 5 Round 1 Matches" -> "5"
+                                parts = title.replace(f" {suffix}", "").replace("Party ", "")
+                                party_id = int(parts)
                                 
-                                st.success(f"✅ Successfully updated '{target_sheet_title}' and regenerated download files!")
-                                time.sleep(1)
-                                st.rerun()
+                                if suffix not in found_data:
+                                    found_data[suffix] = []
+                                found_data[suffix].append(party_id)
+                            except ValueError:
+                                continue
+
+                # 3. Determine the UI based on what we found
+                if not found_data:
+                    st.warning("⚠️ No match sheets found in 'OverallMatchingInformation'.")
+                    st.info("Please run the matching algorithm or ensure sheets are named 'Party X Round 1 Matches' or 'Party X Rotation Flow'.")
                 else:
-                    st.warning("This sheet appears to be empty.")
-            else:
-                st.warning(f"No sheets found matching the pattern 'Party X {sheet_suffix}'. Please run the matching algorithm first.")
-        
-        else:
-            st.info("⚠️ Please run the matching algorithm in the **'Run Matching'** tab first.")
+                    # A. Select Schedule Type (if multiple types exist)
+                    available_types = sorted(found_data.keys())
+                    
+                    if len(available_types) > 1:
+                        selected_type = st.radio("Select Schedule Type:", available_types, horizontal=True)
+                    else:
+                        selected_type = available_types[0]
+                        st.info(f"Viewing Schedule: **{selected_type}**")
+
+                    # B. Select Party (filtered by the chosen type)
+                    available_parties = sorted(found_data[selected_type])
+                    
+                    if available_parties:
+                        st.divider()
+                        selected_party = st.selectbox(
+                            f"Select Party to Edit ({selected_type}):", 
+                            available_parties, 
+                            format_func=lambda x: f"Party {x}"
+                        )
+                        
+                        # Construct the exact sheet title
+                        target_sheet_title = f"Party {selected_party} {selected_type}"
+                        
+                        # 4. Load Data
+                        st.markdown(f"### Editing: {target_sheet_title}")
+                        
+                        try:
+                            worksheet = sh.worksheet(target_sheet_title)
+                            raw_data = worksheet.get_all_records()
+                            
+                            # Convert to DataFrame (all as string to preserve formatting/leading zeros)
+                            df_to_edit = pd.DataFrame(raw_data).astype(str)
+                            
+                            # 5. Render Editor
+                            if not df_to_edit.empty:
+                                edited_df = st.data_editor(
+                                    df_to_edit, 
+                                    use_container_width=True, 
+                                    hide_index=True,
+                                    num_rows="dynamic",
+                                    key=f"editor_{selected_party}_{selected_type}"
+                                )
+
+                                # 6. Save Button
+                                if st.button("💾 Save Changes to Google Drive"):
+                                    with st.spinner(f"Saving to '{target_sheet_title}'..."):
+                                        # Ensure your save_party_to_gsheet function is available in the script
+                                        # If not, you can use standard gspread commands here.
+                                        save_success = save_party_to_gsheet(
+                                            selected_party, 
+                                            edited_df, 
+                                            specific_title=target_sheet_title
+                                        )
+                                        
+                                        if save_success:
+                                            # Update Session State if it exists (to keep ZIP generation in sync)
+                                            if "match_results" in st.session_state and st.session_state.match_results:
+                                                if "preview_data" in st.session_state.match_results:
+                                                    st.session_state.match_results["preview_data"][selected_party] = edited_df
+                                            
+                                            # Regenerate ZIP file
+                                            regenerate_zip_from_changes()
+                                            
+                                            st.success("✅ Saved and Regenerated!")
+                                            time.sleep(1)
+                                            st.rerun()
+                            else:
+                                st.warning("This sheet is empty.")
+
+                        except Exception as e:
+                            st.error(f"Error loading sheet: {e}")
+                    else:
+                        st.warning(f"No parties found for '{selected_type}'.")
+
+            except Exception as e:
+                st.error(f"❌ Connection Error: {e}")
