@@ -7,7 +7,7 @@ import re
 import difflib
 import io
 import zipfile
-import time  # Added for sleep/backoff
+import time 
 from io import BytesIO
 from math import radians
 from sentence_transformers import SentenceTransformer
