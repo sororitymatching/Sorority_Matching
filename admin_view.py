@@ -1102,44 +1102,65 @@ else:
                     with cols[idx]:
                         st.download_button(label=f"Download {label}", data=data, file_name=fname, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_btn_{fname}", use_container_width=True)
     
-    # --- NEW TAB 8: LIVE MATCH PREVIEW ---
+    # --- TAB 8: LIVE MATCH PREVIEW & EDIT ---
     with tab8:
         st.header("Live Match Preview & Edit")
         if st.session_state.match_results and "preview_data" in st.session_state.match_results:
             data_map = st.session_state.match_results["preview_data"]
             setting = st.session_state.match_results["bump_setting"]
             st.info(f"Showing results for Bump Order Set: **{'Yes' if setting == 'y' else 'No'}**")
+            
             available_parties = sorted(data_map.keys())
             if available_parties:
                 selected_party = st.selectbox("Select Party to View/Edit:", available_parties, format_func=lambda x: f"Party {x}")
-                df = data_map[selected_party]
+                
+                # Retrieve the full raw dataframe from session state
+                raw_df = data_map[selected_party]
+                
                 st.markdown(f"### Party {selected_party} Results")
-                st.caption("You can edit cells below (e.g. change a matched member name). Press 'Save to Google Drive & Regenerate Files' to update the Google Sheet and downloadable Excel files.")
-                if not df.empty:
-                    column_config = {
-                        "Team ID": st.column_config.NumberColumn(disabled=True), 
-                        "Team Members": st.column_config.TextColumn(disabled=True),
-                        "Round": st.column_config.NumberColumn(disabled=True),
-                    }
+                st.caption("You can edit all columns below. Press 'Save to Google Drive' to update the specific tab in 'OverallMatchingInformation' and regenerate the downloadable files.")
+
+                if not raw_df.empty:
+                    # Prepare the DataFrame for display/editing to match the Export format from Tab 7
                     if setting == 'y':
+                        # Logic matches "Round 1 Matches" export
+                        sheet_suffix = "Round 1 Matches"
+                        # Filter for Round 1 only
+                        if 'Round' in raw_df.columns:
+                            df_to_edit = raw_df[raw_df['Round'] == 1].copy()
+                        else:
+                            df_to_edit = raw_df.copy()
+                        
+                        # Drop internal tracking columns to match the clean sheet output
+                        df_to_edit = df_to_edit.drop(columns=['Team ID', 'Round', 'Team Members'], errors='ignore')
                         st.subheader("First Round Network Matches")
-                        # --- MODIFICATION START ---
-                        # Drop columns for display when bump order is set
-                        df_display = df.drop(columns=['Team ID', 'Round'], errors='ignore')
-                        edited_df = st.data_editor(df_display, use_container_width=True, hide_index=True, column_config=column_config)
-                        # --- MODIFICATION END ---
                     else:
+                        # Logic matches "Rotation Flow" export
+                        sheet_suffix = "Rotation Flow"
+                        df_to_edit = raw_df.copy()
+                        # Drop internal tracking columns
+                        df_to_edit = df_to_edit.drop(columns=['Team ID', 'Team Members'], errors='ignore')
                         st.subheader("Full Rotation Flow")
-                        edited_df = st.data_editor(df, use_container_width=True, hide_index=True, column_config=column_config)
+
+                    # Render Data Editor (No column_config means ALL columns are editable)
+                    edited_df = st.data_editor(df_to_edit, use_container_width=True, hide_index=True)
 
                     if st.button("Save to Google Drive & Regenerate Files"):
+                        # Update session state with the EDITED version
                         st.session_state.match_results["preview_data"][selected_party] = edited_df
-                        with st.spinner("Saving to Google Sheets & Regenerating Excel files..."):
-                            save_success = save_party_to_gsheet(selected_party, edited_df)
+                        
+                        # Construct the exact tab title to overwrite the correct sheet
+                        target_sheet_title = f"Party {selected_party} {sheet_suffix}"
+
+                        with st.spinner(f"Updating '{target_sheet_title}' in Google Sheets..."):
+                            # Save using the specific title to overwrite the existing tab
+                            save_success = save_party_to_gsheet(selected_party, edited_df, specific_title=target_sheet_title)
+                            
                             if save_success:
+                                # Update the ZIP file in memory to include the edits
                                 regenerate_zip_from_changes()
-                                st.success(f"✅ Party {selected_party} data saved to Google Sheet and files updated!")
-                                time.sleep(1) # Brief pause to show success message
+                                st.success(f"✅ Successfully updated '{target_sheet_title}' and regenerated download files!")
+                                time.sleep(1) 
                                 st.rerun()
                 else: st.warning("No matches found for this party.")
             else: st.warning("No party data available.")
