@@ -1230,6 +1230,7 @@ else:
     # --- TAB 8: LIVE MATCH PREVIEW & EDIT ---
     with tab8:
         st.header("Preview Party Matches and Edit")
+        st.caption("This tab scans your Google Sheet for existing match schedules.")
 
         # 1. Connect to Google Sheets
         client = get_gspread_client()
@@ -1241,21 +1242,26 @@ else:
                 all_titles = [ws.title for ws in all_worksheets]
 
                 # 2. Analyze existing sheets to find valid Categories and Parties
-                # We look for titles like "Party 1 Round 1 Matches" or "Party 1 Rotation Flow"
-                valid_suffixes = ["Round 1 Matches", "Rotation Flow"]
-                found_data = {} # Structure: { "Round 1 Matches": [1, 2, 3], "Rotation Flow": [1, 2] }
+                # Map the sheet suffixes to user-friendly "Bump Order" labels
+                suffix_map = {
+                    "Round 1 Matches": "Yes",
+                    "Rotation Flow": "No"
+                }
+                
+                # found_data structure: { "Yes": [1, 2, 3], "No": [1, 2] }
+                found_data = {} 
 
                 for title in all_titles:
-                    for suffix in valid_suffixes:
+                    for suffix, bump_label in suffix_map.items():
                         if title.startswith("Party ") and title.endswith(suffix):
                             try:
                                 # Extract Party ID: "Party 5 Round 1 Matches" -> "5"
                                 parts = title.replace(f" {suffix}", "").replace("Party ", "")
                                 party_id = int(parts)
                                 
-                                if suffix not in found_data:
-                                    found_data[suffix] = []
-                                found_data[suffix].append(party_id)
+                                if bump_label not in found_data:
+                                    found_data[bump_label] = []
+                                found_data[bump_label].append(party_id)
                             except ValueError:
                                 continue
 
@@ -1264,17 +1270,17 @@ else:
                     st.warning("⚠️ No match sheets found in 'OverallMatchingInformation'.")
                     st.info("Please run the matching algorithm or ensure sheets are named 'Party X Round 1 Matches' or 'Party X Rotation Flow'.")
                 else:
-                    # A. Select Schedule Type (if multiple types exist)
-                    available_types = sorted(found_data.keys())
+                    # A. Select Bump Order (instead of Schedule Type)
+                    available_bump_options = sorted(found_data.keys(), reverse=True) # Shows 'Yes' then 'No'
                     
-                    if len(available_types) > 1:
-                        selected_type = st.radio("Select Schedule Type:", available_types, horizontal=True)
+                    if len(available_bump_options) > 1:
+                        selected_bump = st.radio("Bump Order Set:", available_bump_options, horizontal=True)
                     else:
-                        selected_type = available_types[0]
-                        st.info(f"Viewing Schedule: **{selected_type}**")
+                        selected_bump = available_bump_options[0]
+                        st.info(f"Bump Order Set: **{selected_bump}**")
 
-                    # B. Select Party (filtered by the chosen type)
-                    available_parties = sorted(found_data[selected_type])
+                    # B. Select Party (filtered by the chosen Bump setting)
+                    available_parties = sorted(found_data[selected_bump])
                     
                     if available_parties:
                         st.divider()
@@ -1283,9 +1289,11 @@ else:
                             available_parties, 
                             format_func=lambda x: f"Party {x}"
                         )
-
-                        # Construct the exact sheet title
-                        target_sheet_title = f"Party {selected_party} {selected_type}"
+                        
+                        # Find the actual suffix to reconstruct the sheet title
+                        # If selected_bump is 'Yes', use 'Round 1 Matches'. If 'No', use 'Rotation Flow'.
+                        actual_suffix = [s for s, b in suffix_map.items() if b == selected_bump][0]
+                        target_sheet_title = f"Party {selected_party} {actual_suffix}"
                         
                         # 4. Load Data
                         st.markdown(f"### Party {selected_party}")
@@ -1294,7 +1302,7 @@ else:
                             worksheet = sh.worksheet(target_sheet_title)
                             raw_data = worksheet.get_all_records()
                             
-                            # Convert to DataFrame (all as string to preserve formatting/leading zeros)
+                            # Convert to DataFrame (all as string)
                             df_to_edit = pd.DataFrame(raw_data).astype(str)
                             
                             # 5. Render Editor
@@ -1304,14 +1312,12 @@ else:
                                     use_container_width=True, 
                                     hide_index=True,
                                     num_rows="dynamic",
-                                    key=f"editor_{selected_party}_{selected_type}"
+                                    key=f"editor_{selected_party}_{selected_bump}"
                                 )
 
                                 # 6. Save Button
                                 if st.button("Save Changes to Google Drive"):
                                     with st.spinner(f"Saving to '{target_sheet_title}'..."):
-                                        # Ensure your save_party_to_gsheet function is available in the script
-                                        # If not, you can use standard gspread commands here.
                                         save_success = save_party_to_gsheet(
                                             selected_party, 
                                             edited_df, 
@@ -1319,7 +1325,7 @@ else:
                                         )
                                         
                                         if save_success:
-                                            # Update Session State if it exists (to keep ZIP generation in sync)
+                                            # Update Session State if it exists
                                             if "match_results" in st.session_state and st.session_state.match_results:
                                                 if "preview_data" in st.session_state.match_results:
                                                     st.session_state.match_results["preview_data"][selected_party] = edited_df
@@ -1336,7 +1342,9 @@ else:
                         except Exception as e:
                             st.error(f"Error loading sheet: {e}")
                     else:
-                        st.warning(f"No parties found for '{selected_type}'.")
+                        st.warning(f"No parties found for Bump Order: {selected_bump}.")
 
             except Exception as e:
                 st.error(f"❌ Connection Error: {e}")
+
+    
