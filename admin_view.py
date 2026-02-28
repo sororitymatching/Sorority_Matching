@@ -227,12 +227,20 @@ def regenerate_zip_from_changes():
     st.session_state.match_results["individual_files"] = individual_party_files
 
 # --- NEW FUNCTION: SAVE TO GOOGLE SHEET ---
-def save_party_to_gsheet(party_num, df):
-    """Writes the given dataframe to a tab named 'Party X Final Matches'."""
+def save_party_to_gsheet(party_num, df, specific_title=None):
+    """
+    Writes the given dataframe to a tab.
+    If specific_title is provided, uses that.
+    Otherwise defaults to 'Party X Final Matches'.
+    """
     try:
         gc = get_gc()
         sh = gc.open(SHEET_NAME)
-        ws_title = f"Party {party_num} Final Matches"
+        
+        if specific_title:
+            ws_title = specific_title
+        else:
+            ws_title = f"Party {party_num} Final Matches"
         
         # Check if worksheet exists, create if not
         try:
@@ -962,6 +970,23 @@ else:
                                 df_bump_flow = pd.DataFrame(bump_instruct_flow)
                                 df_bump_greedy = pd.DataFrame(bump_instruct_greedy)
                                 preview_results[party] = df_rot_flow
+
+                                # --- MODIFIED SECTION: WRITE TO GOOGLE SHEET BASED ON BUMP ORDER ---
+                                if is_bump_order_set == 'y':
+                                    # Filter for Round 1
+                                    export_df = df_rot_flow[df_rot_flow['Round'] == 1].copy()
+                                    export_df = export_df.drop(columns=['Team ID', 'Round', 'Team Members'], errors='ignore')
+                                    sheet_suffix = "Round 1 Matches"
+                                else:
+                                    # Full Rotation Flow
+                                    export_df = df_rot_flow.copy()
+                                    export_df = export_df.drop(columns=['Team ID', 'Team Members'], errors='ignore')
+                                    sheet_suffix = "Rotation Flow"
+                                
+                                # Use the specific title convention requested: Party X [Suffix]
+                                save_party_to_gsheet(party, export_df, specific_title=f"Party {party} {sheet_suffix}")
+                                # -------------------------------------------------------------------
+
                                 flow_costs = df_glob_flow['Match Cost'].dropna()
                                 greedy_costs = df_glob_greedy['Match Cost'].dropna()
                                 summary_data = {
