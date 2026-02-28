@@ -1283,12 +1283,12 @@ else:
                             available_parties, 
                             format_func=lambda x: f"Party {x}"
                         )
-                        
+
                         # Construct the exact sheet title
-                        target_sheet_title = f"Party {selected_party}"
+                        target_sheet_title = f"Party {selected_party} {selected_type}"
                         
                         # 4. Load Data
-                        st.markdown(f"### {target_sheet_title}")
+                        st.markdown(f"### {selected_party}")
                         
                         try:
                             worksheet = sh.worksheet(target_sheet_title)
