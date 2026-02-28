@@ -863,8 +863,6 @@ else:
                                 else: partners = [p.strip() for p in re.split(r'[,;]\s*', partners_str) if p.strip()]
                                 current_members = [submitter] + partners
                                 missing_members = [m for m in current_members if m in party_excused_names]
-                                
-                                # --- MODIFIED: Capture Team ID for Excused Reporting ---
                                 t_id = str(row.get("Team ID", row.get("ID", "Unknown"))) 
                                 if missing_members:
                                     broken_teams_list.append({
@@ -872,7 +870,6 @@ else:
                                         'members': current_members, 
                                         'missing': missing_members
                                     })
-                                # --------------------------------------------------------
                                 else:
                                     t_rank_val = to_float(row.get("Ranking", t_global_max))
                                     safe_t_rank = max(t_global_min, min(t_rank_val, t_global_max))
@@ -888,8 +885,6 @@ else:
                             total_capacity = len(team_list) * matches_per_team
                             if len(pnm_list) > total_capacity:
                                 warning_msg = (f"**Party {party} Warning**: Not enough capacity! {len(pnm_list)} PNMs vs {total_capacity} Slots.\n\n")
-                                
-                                # --- MODIFIED: Detailed Excused Teams Reporting ---
                                 if broken_teams_list:
                                     warning_msg += f"- **Excused Teams:** {len(broken_teams_list)} team(s) removed.\n\n"
                                     for item in broken_teams_list:
@@ -899,19 +894,36 @@ else:
                                         warning_msg += f"    *Reason:* **{missing_mems}** is excused from this party.\n"
                                 else: 
                                     warning_msg += "No teams were removed due to excuses for this party.\n"
-                                # ----------------------------------------------------
 
                                 warning_msg += "\n"
+                                
+                                # --- MODIFIED: Detailed Conflict Reporting (With IDs) ---
+                                pnm_name_to_id = {p['name']: p['id'] for p in pnm_list}
+                                member_name_to_id = {}
                                 active_team_members = set()
-                                for t in team_list: active_team_members.update(t['members'])
-                                pnm_names_in_party = {p['name'] for p in pnm_list}
+                                for t in team_list: 
+                                    active_team_members.update(t['members'])
+                                    for m_name, m_id in zip(t['members'], t['member_ids']):
+                                        if m_name and m_id:
+                                            member_name_to_id[m_name] = m_id
+
+                                pnm_names_in_party = set(pnm_name_to_id.keys())
                                 relevant_conflicts = []
+                                
                                 for (m_name, p_name) in no_match_pairs:
                                     if p_name in pnm_names_in_party and m_name in active_team_members:
-                                        relevant_conflicts.append(f"Sorority Member {m_name} and PNM {p_name}")
+                                        m_id = member_name_to_id.get(m_name, "Unknown ID")
+                                        p_id = pnm_name_to_id.get(p_name, "Unknown ID")
+                                        relevant_conflicts.append(f"Member **{m_name}** ({m_id}) & PNM **{p_name}** ({p_id})")
+                                
                                 if relevant_conflicts:
                                     warning_msg += f"- **Active No-Match Constraints:** {len(relevant_conflicts)} pair(s) found.\n"
-                                else: warning_msg += "No conflicts found between present PNMs and Members.\n"
+                                    for conflict in relevant_conflicts:
+                                        warning_msg += f"  • {conflict}\n"
+                                else: 
+                                    warning_msg += "No conflicts found between present PNMs and Members.\n"
+                                # ---------------------------------------------------------
+                                
                                 st.warning(warning_msg)
 
                             potential_pairs = []
@@ -1196,8 +1208,7 @@ else:
                 for idx, (label, fname, data) in enumerate(row_files):
                     with cols[idx]:
                         st.download_button(label=f"Download {label}", data=data, file_name=fname, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_btn_{fname}", use_container_width=True)
-
-    # --- TAB 8: LIVE MATCH PREVIEW & EDIT ---
+        # --- TAB 8: LIVE MATCH PREVIEW & EDIT ---
     with tab8:
         st.header("Preview Party Matches and Edit")
         if st.session_state.match_results and "preview_data" in st.session_state.match_results:
