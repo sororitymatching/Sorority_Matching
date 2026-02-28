@@ -7,13 +7,14 @@ import re
 import difflib
 import io
 import zipfile
-import time  # Added for sleep/backoff
+import time
+import random  # Added for randomized backoff jitter
 from io import BytesIO
 from math import radians
 from sentence_transformers import SentenceTransformer
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.metrics.pairwise import haversine_distances
-from gspread.exceptions import APIError, WorksheetNotFound # Added WorksheetNotFound
+from gspread.exceptions import APIError, WorksheetNotFound
 
 # --- CONFIGURATION ---
 SHEET_NAME = "OverallMatchingInformation"
@@ -55,19 +56,46 @@ def get_gc():
     creds_dict = dict(st.secrets["gcp_service_account"])
     return gspread.service_account_from_dict(creds_dict, scopes=SCOPES)
 
-# 2. Retry wrapper
+# 2. ROBUST WRITE WRAPPER (Prevents Quota Hits)
+def robust_api_write(func, *args, **kwargs):
+    """
+    Executes a Google API write function with exponential backoff.
+    Retries on 429 (Too Many Requests) or 500 (Server Error).
+    """
+    max_retries = 7
+    for n in range(max_retries):
+        try:
+            return func(*args, **kwargs)
+        except APIError as e:
+            # Check for Rate Limit (429) or Server Error (5xx)
+            if hasattr(e, 'response') and (e.response.status_code == 429 or e.response.status_code >= 500):
+                # Exponential backoff with jitter: 2s, 4s, 8s... + random ms
+                sleep_time = (2 ** n) + random.uniform(0.5, 1.5)
+                # Log to console or toast UI (optional)
+                print(f"API Limit Hit. Retrying in {sleep_time:.2f}s...") 
+                time.sleep(sleep_time)
+            elif "429" in str(e) or "Quota exceeded" in str(e): # Fallback text check
+                sleep_time = (2 ** n) + random.uniform(0.5, 1.5)
+                time.sleep(sleep_time)
+            else:
+                raise e # Raise other errors (e.g., 403 Permission denied) immediately
+        except Exception as e:
+            raise e
+    raise APIError("Max retries exceeded for Google Sheets API write operation.")
+
+# 3. Smart Read with Retry (Existing logic preserved/cleaned)
 def smart_read_sheet(sheet_object):
     for n in range(5): 
         try:
             return sheet_object.get_all_values()
         except APIError as e:
-            if "429" in str(e):
+            if "429" in str(e) or "Quota" in str(e):
                 time.sleep((2 ** n) + 1)
             else:
                 raise e
     return []
 
-# 3. Cache the data fetching
+# 4. Cache the data fetching
 @st.cache_data(ttl=600)
 def get_data(worksheet_name):
     try:
@@ -82,7 +110,7 @@ def get_data(worksheet_name):
         if worksheet_name != "PNM Information": pass 
         return pd.DataFrame()
 
-# 4. Cache the bulk loader
+# 5. Cache the bulk loader
 @st.cache_data(ttl=600)
 def load_google_sheet_data(sheet_name):
     try:
@@ -112,10 +140,13 @@ def update_roster(names_list):
     try:
         gc = get_gc()
         ws = gc.open(SHEET_NAME).worksheet("Settings")
-        ws.batch_clear(["D2:D1000"])
+        # Use robust wrapper
+        robust_api_write(ws.batch_clear, ["D2:D1000"])
+        
         names_list.sort()
         formatted = [[n] for n in names_list if n.strip()]
-        if formatted: ws.update(range_name='D2', values=formatted)
+        if formatted: 
+            robust_api_write(ws.update, range_name='D2', values=formatted)
         return True
     except: return False
 
@@ -125,7 +156,8 @@ def update_team_ranking(team_id, new_ranking):
         sheet = gc.open(SHEET_NAME).worksheet("Bump Teams")
         cell = sheet.find(str(team_id), in_column=5)
         if cell:
-            sheet.update_cell(cell.row, 6, new_ranking)
+            # Use robust wrapper
+            robust_api_write(sheet.update_cell, cell.row, 6, new_ranking)
             get_data.clear()
             load_google_sheet_data.clear()
             return True
@@ -153,7 +185,10 @@ def batch_update_pnm_rankings(rankings_map):
                 while len(row) <= rank_idx: row.append("")
                 row[rank_idx] = str(rankings_map[p_id])
                 updates_count += 1
-        sheet.update(values=all_values, range_name="A1")
+        
+        # Use robust wrapper for the bulk update
+        robust_api_write(sheet.update, values=all_values, range_name="A1")
+        
         get_data.clear()
         load_google_sheet_data.clear()
         return updates_count
@@ -182,7 +217,10 @@ def batch_update_team_rankings(rankings_map):
                 while len(row) <= rank_idx: row.append("")
                 row[rank_idx] = str(rankings_map[t_id])
                 updates_count += 1
-        sheet.update(values=all_values, range_name="A1")
+        
+        # Use robust wrapper for the bulk update
+        robust_api_write(sheet.update, values=all_values, range_name="A1")
+        
         get_data.clear()
         load_google_sheet_data.clear()
         return updates_count
@@ -226,12 +264,11 @@ def regenerate_zip_from_changes():
     st.session_state.match_results["zip_data"] = zip_buffer.getvalue()
     st.session_state.match_results["individual_files"] = individual_party_files
 
-# --- NEW FUNCTION: SAVE TO GOOGLE SHEET ---
+# --- NEW FUNCTION: SAVE TO GOOGLE SHEET (WITH RATE LIMIT PROTECTION) ---
 def save_party_to_gsheet(party_num, df, specific_title=None):
     """
     Writes the given dataframe to a tab.
-    If specific_title is provided, uses that.
-    Otherwise defaults to 'Party X Final Matches'.
+    Includes Robust Rate Limiting via robust_api_write.
     """
     try:
         gc = get_gc()
@@ -244,10 +281,13 @@ def save_party_to_gsheet(party_num, df, specific_title=None):
         
         # Check if worksheet exists, create if not
         try:
-            ws = sh.worksheet(ws_title)
-            ws.clear() # Clear existing content
+            # Try to open existing
+            ws = robust_api_write(sh.worksheet, ws_title)
+            # Clear it
+            robust_api_write(ws.clear) 
         except WorksheetNotFound:
-            ws = sh.add_worksheet(title=ws_title, rows=100, cols=20)
+            # Create new if not found
+            ws = robust_api_write(sh.add_worksheet, title=ws_title, rows=100, cols=20)
             
         # Prepare Data: Handle NaNs (convert to empty string) and timestamps
         df_clean = df.fillna("").astype(str)
@@ -255,8 +295,8 @@ def save_party_to_gsheet(party_num, df, specific_title=None):
         # GSpread requires a list of lists, including the header
         data_to_write = [df_clean.columns.values.tolist()] + df_clean.values.tolist()
         
-        # Write to sheet
-        ws.update(values=data_to_write, range_name="A1")
+        # Write to sheet using robust wrapper
+        robust_api_write(ws.update, values=data_to_write, range_name="A1")
         return True
     except Exception as e:
         st.error(f"Failed to save to Google Sheet: {e}")
@@ -985,6 +1025,7 @@ else:
                                 
                                 # Use the specific title convention requested: Party X [Suffix]
                                 save_party_to_gsheet(party, export_df, specific_title=f"Party {party} {sheet_suffix}")
+                                time.sleep(1.5) # ADDED: Throttle loop to prevent burst limit hits
                                 # -------------------------------------------------------------------
 
                                 flow_costs = df_glob_flow['Match Cost'].dropna()
