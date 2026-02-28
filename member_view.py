@@ -333,11 +333,11 @@ with tab2:
                     st.error(f"Error: {e}")
 
 # ==========================
-# TAB 3: PARTY EXCUSES (MODIFIED)
+# TAB 3: PARTY EXCUSES (LINK ONLY)
 # ==========================
 with tab3:
     st.header("Recruitment Party Excuse Form")
-    st.markdown("Submit an excuse for **one party at a time**. Valid proof (an image upload or link) is required.")
+    st.markdown("Submit an excuse for **one party at a time**. You must provide a **shareable link** to your proof.")
 
     excuse_name = st.selectbox("Choose your name:", [""] + roster, key="excuse_name")
     
@@ -348,7 +348,7 @@ with tab3:
     selected_party_clean = selected_party_display.split(" (")[0] if selected_party_display else ""
     
     existing_reason = ""
-    existing_proof = "" # Placeholder for existing proof if we wanted to show it
+    existing_link = "" 
     existing_row_idx = None
     
     # Check for existing data for this specific member AND party
@@ -360,32 +360,25 @@ with tab3:
             if row_idx:
                 existing_row_idx = row_idx
                 st.info(f"ℹ️ You have already submitted an excuse for {selected_party_clean}. Submitting again will update it.")
+                
+                # Pre-fill Reason (Col 5 / Index 4)
                 if len(row_vals) > 4:
                     existing_reason = row_vals[4]
-                # If you wanted to see the existing proof link/filename, it would be at row_vals[5]
+                
+                # Pre-fill Link (Col 6 / Index 5)
+                if len(row_vals) > 5:
+                    existing_link = row_vals[5]
 
     with st.form(key='excuse_form'):
         # 2. Reason Text
         excuse_reason = st.text_area("Reason for skipping:", value=existing_reason, placeholder="e.g. Class conflict (BIO 101), Doctor's Appointment")
         
-        # 3. Proof: Upload OR Link (New Logic)
+        # 3. Proof: Link Only
         st.write("---")
-        st.markdown("**Proof of Excuse**")
-        st.caption("Please provide proof. If uploading, the file name will be saved. If providing a link, it will be clickable in the sheet.")
+        st.markdown("**Proof of Excuse (Link Required)**")
+        st.caption("Please upload your proof (image/screenshot) to Google Drive, Dropbox, or iCloud, then paste the **shareable link** below.")
         
-        proof_method = st.radio("How would you like to submit proof?", ["Upload Image", "Paste Link"], horizontal=True)
-        
-        final_proof_string = None
-        
-        if proof_method == "Upload Image":
-            proof_image = st.file_uploader("Upload Image:", type=['png', 'jpg', 'jpeg'])
-            if proof_image:
-                # We save the filename to indicate a file was provided
-                final_proof_string = f"FILE: {proof_image.name}"
-        else:
-            proof_link = st.text_input("Paste Link (Google Drive, iCloud, etc.):", placeholder="https://...")
-            if proof_link.strip():
-                final_proof_string = proof_link.strip()
+        proof_link = st.text_input("Paste Shareable Link:", value=existing_link, placeholder="https://drive.google.com/...")
         
         submit_excuse = st.form_submit_button(label='Submit Excuse')
 
@@ -397,8 +390,8 @@ with tab3:
             st.error("⚠️ Please select a party.")
         elif not excuse_reason.strip():
             st.error("⚠️ Please provide a reason for missing the party.")
-        elif not final_proof_string: 
-            st.error("⚠️ You must upload an image or provide a valid link.")
+        elif not proof_link.strip() or "http" not in proof_link: 
+            st.error("⚠️ You must provide a valid link (starting with http/https) to your proof.")
         else:
             sheet_excuses = get_sheet("Party Excuses")
             sheet_mem = get_sheet("Member Information")
@@ -411,8 +404,8 @@ with tab3:
                     
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     
-                    # Data Structure: Timestamp, Name, ID, Clean Party Name, Reason, PROOF (Link or Filename)
-                    row_data = [timestamp, excuse_name, member_id, selected_party_clean, excuse_reason, final_proof_string]
+                    # Data Structure: Timestamp, Name, ID, Clean Party Name, Reason, PROOF LINK
+                    row_data = [timestamp, excuse_name, member_id, selected_party_clean, excuse_reason, proof_link.strip()]
                     
                     if existing_row_idx:
                         # Update existing row (Cols A-F)
