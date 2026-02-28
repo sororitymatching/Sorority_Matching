@@ -688,7 +688,12 @@ with tab6:
     
     if match_sheets:
         # 2. Select Box for Sheets
-        selected_sheet_name = st.selectbox("Select Schedule:", match_sheets)
+        # Modified: format_func cleans the name for display, but selected_sheet_name keeps the real file name
+        selected_sheet_name = st.selectbox(
+            "Select Schedule:", 
+            match_sheets,
+            format_func=lambda x: x.replace(" Matches", "").replace(" Flow", "")
+        )
         
         if st.button("🔄 Refresh Matches"):
             st.cache_data.clear()
