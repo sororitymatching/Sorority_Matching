@@ -651,7 +651,7 @@ else:
 
         with col_p2:
             st.markdown("<br>", unsafe_allow_html=True) # Spacer
-            if st.button("💾 Save Published Parties"):
+            if st.button("Save Published Parties"):
                 with st.spinner("Saving settings..."):
                     if update_visible_parties(selected_parties_to_show):
                         st.success("✅ Saved!")
