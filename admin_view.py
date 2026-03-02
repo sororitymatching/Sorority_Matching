@@ -664,7 +664,7 @@ else:
                 format_func=lambda x: f"Party {x}", 
                 default=[] 
             )
-            st.caption("ℹ️ **Note:** Updating this list and clicking 'Save' allows you to change which parties members can see immediately, without needing to re-run the entire matching algorithm.")
+            st.caption("**Note:** Updating this list and clicking 'Save' allows you to change which parties members can see immediately, without needing to re-run the entire matching algorithm.")
 
         with col_p2:
             st.markdown("<br>", unsafe_allow_html=True) # Spacer
