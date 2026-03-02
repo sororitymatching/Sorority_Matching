@@ -6,13 +6,12 @@ from datetime import datetime
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Recruitment Registration",
-    page_icon="🌸",
-    layout="centered" # "Centered" looks more like a form/letter than "Wide"
+    page_title="PNM Recruitment Form",
+    page_icon="💙",
+    layout="centered"
 )
 
-# --- CUSTOM CSS & THEME ---
-# This block injects custom HTML/CSS to override Streamlit's default look
+# --- CUSTOM CSS & THEME (Penn State Blue & White) ---
 def local_css():
     st.markdown("""
     <style>
@@ -21,36 +20,40 @@ def local_css():
 
         /* Background & Main Text */
         .stApp {
-            background-color: #FAFAFA; /* clean white/grey background */
+            background-color: #FFFFFF;
             font-family: 'Montserrat', sans-serif;
-            color: #333333;
+            color: #041E42; /* PSU Navy */
         }
 
-        /* Headers */
+        /* Headers (Matching the 'Penn State University' text style) */
         h1, h2, h3 {
             font-family: 'Playfair Display', serif !important;
-            color: #B46B84; /* Dusty Rose / Sorority Pink */
+            color: #041E42; /* PSU Navy */
             text-align: center;
         }
         
-        /* Subheaders styling */
+        /* Subheaders */
         .css-10trblm {
             font-family: 'Montserrat', sans-serif;
-            color: #B46B84;
+            color: #6C9AC3; /* Soft Blue accent */
             font-weight: 600;
         }
 
         /* Input Fields */
-        .stTextInput > div > div > input, .stSelectbox > div > div > div, .stNumberInput > div > div > input {
-            border-radius: 10px;
-            border: 1px solid #E0E0E0;
-            background-color: #FFFFFF;
+        .stTextInput > div > div > input, 
+        .stSelectbox > div > div > div, 
+        .stNumberInput > div > div > input,
+        .stTextArea > div > div > textarea {
+            border-radius: 8px;
+            border: 1px solid #8CBED6; /* The Bow Blue */
+            background-color: #FDFDFD;
+            color: #041E42;
         }
 
         /* Buttons */
         .stButton > button {
-            background-color: #B46B84;
-            color: white;
+            background-color: #8CBED6; /* The Bow Blue */
+            color: #FFFFFF;
             border-radius: 25px;
             padding: 10px 25px;
             font-family: 'Montserrat', sans-serif;
@@ -58,24 +61,27 @@ def local_css():
             border: none;
             width: 100%;
             transition: all 0.3s ease;
+            text-shadow: 0px 1px 2px rgba(0,0,0,0.1);
         }
         .stButton > button:hover {
-            background-color: #965A6E; /* Darker shade on hover */
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            background-color: #041E42; /* Hover turns to PSU Navy */
+            color: #FFFFFF;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.15);
         }
 
         /* Info Box Styling */
         .stAlert {
-            background-color: #FFF0F5;
-            border: 1px solid #B46B84;
-            color: #B46B84;
+            background-color: #F0F8FF; /* Alice Blue */
+            border: 1px solid #8CBED6;
+            color: #041E42;
         }
         
-        /* Custom divider */
+        /* Divider */
         hr {
             margin: 2em 0;
             border: 0;
-            border-top: 1px solid #E0E0E0;
+            border-top: 1px solid #8CBED6; /* Soft Blue line */
+            opacity: 0.5;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -83,7 +89,6 @@ def local_css():
 local_css()
 
 # --- Google Sheets Connection Function ---
-# (Logic Unchanged)
 def get_google_sheet_connection():
     scope = [
         "https://www.googleapis.com/auth/spreadsheets",
@@ -110,7 +115,6 @@ def get_worksheet():
     return None
 
 # --- Helper: Find Row by Email ---
-# (Logic Unchanged)
 def find_pnm_by_email(sheet, email):
     try:
         all_values = sheet.get_all_values()
@@ -125,19 +129,25 @@ def find_pnm_by_email(sheet, email):
 
 # --- Main Form UI ---
 
-# Optional: Add a banner image (Use a URL or local file)
-# st.image("https://your-sorority-banner-url.com/banner.jpg", use_column_width=True)
+# 1. DISPLAY THE HEADER IMAGE
+# Ensure you save your uploaded image as 'recruitment_theme.png' in the same folder
+try:
+    col_spacer1, col_img, col_spacer2 = st.columns([1, 2, 1])
+    with col_img:
+        st.image("recruitment_theme.png", use_column_width=True)
+except:
+    st.markdown("<h1 style='text-align: center; color: #8CBED6;'>🎀</h1>", unsafe_allow_html=True)
 
 st.title("Recruitment Interest Form")
-st.markdown("<p style='text-align: center; color: #666;'>We are so excited to meet you! Please enter your Penn State Email to get started.</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #555;'>We are so excited to meet you! Please enter your Penn State Email to get started.</p>", unsafe_allow_html=True)
 st.markdown("---")
 
-# 1. THE LOOKUP TRIGGER
-col_search, col_space = st.columns([2,1]) # Use columns to center or organize
+# 2. THE LOOKUP TRIGGER
+col_search, col_space = st.columns([2,1])
 with col_search:
-    search_email = st.text_input("💌 Enter your PSU Email (e.g., xyz123@psu.edu):").strip().lower()
+    search_email = st.text_input("💙 Enter your PSU Email (e.g., xyz123@psu.edu):").strip().lower()
 
-# 2. INITIALIZE DEFAULTS
+# 3. INITIALIZE DEFAULTS
 defaults = {
     "name": "", "major": "", "minor": "", "hometown": "",
     "year": "Freshman", "hs_name": "", "hs_gpa": 0.0, "college_gpa": 0.0,
@@ -150,7 +160,7 @@ existing_row_index = None
 existing_pnm_id = None
 sheet = get_worksheet()
 
-# 3. FETCH EXISTING DATA
+# 4. FETCH EXISTING DATA
 if search_email and sheet:
     found_idx, row_vals = find_pnm_by_email(sheet, search_email)
     if found_idx:
@@ -158,7 +168,6 @@ if search_email and sheet:
         st.info(f"✨ Welcome back! We found your record. You are editing existing data.")
         
         try:
-            # Mapping logic preserved exactly as requested
             if len(row_vals) > 1: defaults["name"] = row_vals[1]
             if len(row_vals) > 2: defaults["major"] = row_vals[2]
             if len(row_vals) > 3: defaults["minor"] = row_vals[3]
@@ -184,16 +193,16 @@ if search_email and sheet:
         except ValueError:
             pass 
 
-# 4. THE FORM
-if search_email: # Only show form if email is entered
+# 5. THE FORM
+if search_email:
     with st.form(key='pnm_form'):
         
         # Section 1: Personal Info
-        st.markdown("### 🎀 Personal Information")
+        st.markdown("### 🤍 Personal Information")
         col1, col2 = st.columns(2)
         
         with col1:
-            name = st.text_input("Full Name", value=defaults["name"], placeholder="Jane Doe")
+            name = st.text_input("Full Name", value=defaults["name"])
             major = st.text_input('Major (or "Undecided")', value=defaults["major"])
             minor = st.text_input("Minor", value=defaults["minor"])
             hometown = st.text_input("Hometown (City, State)", value=defaults["hometown"])
@@ -203,12 +212,12 @@ if search_email: # Only show form if email is entered
             yr_idx = yr_opts.index(defaults["year"]) if defaults["year"] in yr_opts else 0
             year = st.selectbox("Year in School", yr_opts, index=yr_idx)
             
-            st.text_input("Email (Locked)", value=search_email, disabled=True, help="To change email, refresh the page.")
+            st.text_input("Email (Locked)", value=search_email, disabled=True)
 
         st.markdown("---")
 
         # Section 2: Academic History
-        st.markdown("### 📚 Academic History")
+        st.markdown("### 📖 Academic History")
         col3, col4 = st.columns(2)
         
         with col3:
@@ -253,7 +262,7 @@ if search_email: # Only show form if email is entered
         st.markdown("---")
 
         # Section 4: Additional Info
-        st.markdown("### 💖 Getting to Know You")
+        st.markdown("### 💭 Getting to Know You")
         
         col7, col8 = st.columns(2)
         with col7:
@@ -265,7 +274,7 @@ if search_email: # Only show form if email is entered
 
         st.markdown("<br>", unsafe_allow_html=True)
         # Submit Button
-        submit_button = st.form_submit_button(label='💖 Submit Information')
+        submit_button = st.form_submit_button(label='💙 Submit Information')
 
     # --- Submission Logic ---
     if submit_button:
