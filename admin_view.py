@@ -676,7 +676,7 @@ else:
                         st.error("Error saving.")
 
         matches_per_team = st.number_input("Matches per Bump Team (Capacity)", min_value=1, value=2)
-        num_rounds = st.number_input("Rounds per Party", min_value=1, value=4)
+        num_rounds = st.number_input("Bumps per Party", min_value=1, value=4)
         bump_order_set = st.radio("Is Bump Order Set?", ("Yes", "No"), horizontal=True)
         is_bump_order_set = "y" if bump_order_set == "Yes" else "n"
         st.divider()
